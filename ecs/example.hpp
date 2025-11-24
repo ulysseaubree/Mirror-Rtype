@@ -19,7 +19,7 @@ class MovementSystem : public System {
 public:
     void Update(float dt)
     {
-        for (Entity entity : mEntities) {
+        for (Entity entity : entities) {
             auto& transform = gCoordinator.GetComponent<Transform>(entity);
             const auto& velocity = gCoordinator.GetComponent<Velocity>(entity);
             transform.x += velocity.vx * dt;
@@ -49,4 +49,3 @@ inline void ExampleEcsUsage()
 }
 
 } // namespace ecs
-
