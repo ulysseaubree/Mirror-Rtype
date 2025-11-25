@@ -9,8 +9,6 @@
 #include "types.hpp"
 
 namespace ecs {
-
-inline Coordinator gCoordinator{};
-
+    inline Coordinator gCoordinator{};
 } // namespace ecs
 

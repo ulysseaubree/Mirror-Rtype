@@ -63,7 +63,8 @@ public:
     void EntityDestroyed(Entity entity)
     {
         for (ComponentType type = 0; type < mNextComponentType; ++type) {
-            if (auto& storage = mComponentArrays[type]; storage && mDestroyCallbacks[type]) {
+            auto& storage = mComponentArrays[type];
+            if (storage && mDestroyCallbacks[type]) {
                 mDestroyCallbacks[type](storage.get(), entity);
             }
         }
