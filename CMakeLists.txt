@@ -64,6 +64,14 @@ set(ECS_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/ecs/core
     ${CMAKE_SOURCE_DIR}/ecs/game
     ${CMAKE_SOURCE_DIR}/ecs/network
+    ${CMAKE_SOURCE_DIR}/ecs/utils
+)
+
+# ========================================
+# Utils source
+# ========================================
+set(UTILS_SOURCES
+    ${CMAKE_SOURCE_DIR}/ecs/utils/utils.cpp
 )
 
 # ========================================
@@ -82,6 +90,9 @@ if(BUILD_SERVER)
         message(WARNING "Pas de sources serveur trouvées, main.cpp sera nécessaire")
     endif()
     
+    # Ajouter Utils.cpp
+    list(APPEND SERVER_SOURCES ${UTILS_SOURCES})
+    
     add_executable(r-type_server ${SERVER_SOURCES})
     
     target_include_directories(r-type_server PRIVATE
@@ -92,6 +103,8 @@ if(BUILD_SERVER)
     
     target_link_libraries(r-type_server PRIVATE
         Threads::Threads
+        sfml-graphics
+        sfml-system
     )
     
     set_target_properties(r-type_server PROPERTIES
@@ -116,6 +129,9 @@ if(BUILD_CLIENT)
         set(CLIENT_SOURCES "${CMAKE_SOURCE_DIR}/client/main.cpp")
         message(WARNING "Pas de sources client trouvées, main.cpp sera nécessaire")
     endif()
+    
+    # Ajouter Utils.cpp
+    list(APPEND CLIENT_SOURCES ${UTILS_SOURCES})
     
     add_executable(r-type_client ${CLIENT_SOURCES})
     
