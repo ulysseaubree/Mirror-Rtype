@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <queue>
 #include <utility>
 
 #include "component_manager.hpp"
@@ -29,6 +30,20 @@ public:
         mComponentManager->EntityDestroyed(entity);
         mSystemManager->EntityDestroyed(entity);
         mEntityManager->DestroyEntity(entity);
+    }
+
+    void RequestDestroyEntity(Entity entity)
+    {
+        mEntitiesToDestroy.push(entity);
+    }
+
+    void ProcessDestructions()
+    {
+        while (!mEntitiesToDestroy.empty()) {
+            Entity entity = mEntitiesToDestroy.front();
+            mEntitiesToDestroy.pop();
+            DestroyEntity(entity);
+        }
     }
 
     template <typename T>
@@ -87,7 +102,7 @@ private:
     std::unique_ptr<EntityManager> mEntityManager{};
     std::unique_ptr<ComponentManager> mComponentManager{};
     std::unique_ptr<SystemManager> mSystemManager{};
+    std::queue<Entity> mEntitiesToDestroy{};
 };
 
 } // namespace ecs
-

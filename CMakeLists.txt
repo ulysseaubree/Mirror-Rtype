@@ -13,15 +13,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ========================================
 option(BUILD_SERVER "Build the server" ON)
 option(BUILD_CLIENT "Build the client" ON)
+option(BUILD_TESTS "Build unit tests" OFF)
 
 # ========================================
 # Dépendances
 # ========================================
 
-# SFML (pour le client)
-if(BUILD_CLIENT)
-    find_package(SFML 2.5 COMPONENTS graphics window system audio REQUIRED)
-endif()
+# SFML (pour le client et certains composants serveur)
+find_package(SFML 2.5 COMPONENTS graphics window system audio REQUIRED)
 
 # ASIO (header-only pour le réseau)
 find_path(ASIO_INCLUDE_DIR asio.hpp
@@ -75,6 +74,21 @@ set(UTILS_SOURCES
 )
 
 # ========================================
+# ECS Library (Static)
+# ========================================
+# Créer une bibliothèque statique pour l'ECS
+add_library(ecs_lib INTERFACE)
+
+target_include_directories(ecs_lib INTERFACE
+    ${ECS_INCLUDE_DIRS}
+)
+
+target_link_libraries(ecs_lib INTERFACE
+    sfml-graphics
+    sfml-system
+)
+
+# ========================================
 # SERVER
 # ========================================
 if(BUILD_SERVER)
@@ -90,8 +104,10 @@ if(BUILD_SERVER)
         message(WARNING "Pas de sources serveur trouvées, main.cpp sera nécessaire")
     endif()
     
-    # Ajouter Utils.cpp
-    list(APPEND SERVER_SOURCES ${UTILS_SOURCES})
+    # Ajouter Utils.cpp si existe
+    if(UTILS_SOURCES)
+        list(APPEND SERVER_SOURCES ${UTILS_SOURCES})
+    endif()
     
     add_executable(r-type_server ${SERVER_SOURCES})
     
@@ -102,6 +118,7 @@ if(BUILD_SERVER)
     )
     
     target_link_libraries(r-type_server PRIVATE
+        ecs_lib
         Threads::Threads
         sfml-graphics
         sfml-system
@@ -130,8 +147,10 @@ if(BUILD_CLIENT)
         message(WARNING "Pas de sources client trouvées, main.cpp sera nécessaire")
     endif()
     
-    # Ajouter Utils.cpp
-    list(APPEND CLIENT_SOURCES ${UTILS_SOURCES})
+    # Ajouter Utils.cpp si existe
+    if(UTILS_SOURCES)
+        list(APPEND CLIENT_SOURCES ${UTILS_SOURCES})
+    endif()
     
     add_executable(r-type_client ${CLIENT_SOURCES})
     
@@ -142,6 +161,7 @@ if(BUILD_CLIENT)
     )
     
     target_link_libraries(r-type_client PRIVATE
+        ecs_lib
         sfml-graphics
         sfml-window
         sfml-system
@@ -157,33 +177,79 @@ if(BUILD_CLIENT)
 endif()
 
 # ========================================
+# Tests (optionnel)
+# ========================================
+if(BUILD_TESTS)
+    enable_testing()
+    
+    # Vous pouvez ajouter Google Test ou Catch2 ici
+    message(STATUS "Tests enabled")
+    
+    # Exemple avec Catch2
+    # find_package(Catch2 REQUIRED)
+    # add_executable(ecs_tests tests/test_main.cpp tests/test_ecs.cpp)
+    # target_link_libraries(ecs_tests PRIVATE ecs_lib Catch2::Catch2)
+    # add_test(NAME ECSTests COMMAND ecs_tests)
+endif()
+
+# ========================================
 # Warnings
 # ========================================
 if(MSVC)
-    target_compile_options(r-type_server PRIVATE /W4)
-    if(BUILD_CLIENT)
-        target_compile_options(r-type_client PRIVATE /W4)
-    endif()
+    set(WARNING_FLAGS /W4 /WX-)
 else()
-    target_compile_options(r-type_server PRIVATE -Wall -Wextra -Wpedantic)
-    if(BUILD_CLIENT)
-        target_compile_options(r-type_client PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
+    set(WARNING_FLAGS -Wall -Wextra -Wpedantic -Wno-unused-parameter)
+endif()
+
+if(BUILD_SERVER)
+    target_compile_options(r-type_server PRIVATE ${WARNING_FLAGS})
+endif()
+
+if(BUILD_CLIENT)
+    target_compile_options(r-type_client PRIVATE ${WARNING_FLAGS})
 endif()
 
 # ========================================
 # Installation
 # ========================================
-if (BUILD_SERVER)
+if(BUILD_SERVER)
     install(TARGETS r-type_server
         RUNTIME DESTINATION bin
     )
 endif()
 
-if (BUILD_CLIENT)
+if(BUILD_CLIENT)
     install(TARGETS r-type_client
         RUNTIME DESTINATION bin
     )
+    
+    # Installer les assets si présents
+    if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets"
+            DESTINATION bin
+        )
+    endif()
+endif()
+
+# ========================================
+# Documentation (optionnel)
+# ========================================
+option(BUILD_DOCS "Build documentation" OFF)
+if(BUILD_DOCS)
+    find_package(Doxygen)
+    if(DOXYGEN_FOUND)
+        set(DOXYGEN_IN ${CMAKE_SOURCE_DIR}/docs/Doxyfile.in)
+        set(DOXYGEN_OUT ${CMAKE_BINARY_DIR}/Doxyfile)
+        
+        configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+        
+        add_custom_target(docs
+            COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Generating API documentation with Doxygen"
+            VERBATIM
+        )
+    endif()
 endif()
 
 # ========================================
@@ -196,6 +262,8 @@ message(STATUS "C++ Standard:     ${CMAKE_CXX_STANDARD}")
 message(STATUS "Compiler:         ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "Build Server:     ${BUILD_SERVER}")
 message(STATUS "Build Client:     ${BUILD_CLIENT}")
+message(STATUS "Build Tests:      ${BUILD_TESTS}")
+message(STATUS "Build Docs:       ${BUILD_DOCS}")
 message(STATUS "SFML found:       ${SFML_FOUND}")
 message(STATUS "ASIO include:     ${ASIO_INCLUDE_DIR}")
 message(STATUS "==========================================")

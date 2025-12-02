@@ -5,36 +5,15 @@
 
 namespace ecs {
 
-// === Core Components ===
-
 struct Transform {
     float x{};
     float y{};
-    float rotation{}; // en degrés
+    float rotation{};
 };
 
 struct Velocity {
     float vx{};
     float vy{};
-};
-
-struct RenderShape {
-    enum class Type {
-        Circle,
-        Rectangle,
-        Triangle
-    };
-    
-    Type type{Type::Circle};
-    sf::Color color{sf::Color::White};
-    float width{20.f};
-    float height{20.f};
-    float radius{10.f};
-};
-
-struct PlayerControl {
-    float speed{200.f};
-    float rotationSpeed{180.f};
 };
 
 struct Collider {
@@ -61,15 +40,6 @@ struct Lifetime {
     float timeLeft{5.f};
 };
 
-struct Enemy {
-    float damage{10.f};
-};
-
-struct Projectile {
-    float damage{25.f};
-    Entity owner{};
-};
-
 struct Score {
     int points{0};
 };
@@ -79,12 +49,63 @@ struct Boundary {
     float maxX{800.f};
     float minY{0.f};
     float maxY{600.f};
-    bool wrap{false}; // wraparound style Asteroids
-    bool destroy{true}; // détruire si sort des limites
+    bool wrap{false}; 
+    bool destroy{true};
 };
 
-struct RotationSpeed {
-    float speed{90.f}; // degrés par seconde
+// PlayerInput: Stocke la direction d'input (1-9, numpad style)
+// 7 8 9
+// 4 5 6  (5 = pas de mouvement)
+// 1 2 3
+struct PlayerInput {
+    int direction{5};
+    bool firePressed{false};
 };
 
-} // namespace ecs
+struct Team {
+    int teamID{0};
+};
+
+struct Damager {
+    int damage{10};
+};
+
+struct AIController {
+    enum class State {
+        Idle,
+        Patrolling,
+        Chasing,
+        Fleeing,
+        Attacking
+    };
+    
+    State currentState{State::Idle};
+    Entity target{MAX_ENTITIES};
+    float decisionTimer{0.f};
+    float decisionCooldown{1.0f}; // Temps entre les décisions
+    
+    float detectionRange{200.f};
+    float attackRange{50.f};
+    float fleeHealthThreshold{0.3f}; // Fuit si santé < 30%
+};
+
+struct Spawner {
+    enum class SpawnType {
+        Projectile,
+        Enemy,
+        Powerup
+    };
+    
+    SpawnType typeToSpawn{SpawnType::Projectile};
+    float spawnCooldown{1.0f};
+    float spawnTimer{0.f};
+    int maxSpawns{-1};
+    int spawnCount{0};
+    
+    float spawnOffsetX{0.f};
+    float spawnOffsetY{0.f};
+    float spawnVelocityX{0.f};
+    float spawnVelocityY{100.f};
+};
+
+}
