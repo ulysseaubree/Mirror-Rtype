@@ -1,53 +1,99 @@
 #pragma once
 
-#include <iostream>
 #include <string>
-#include <vector>
 #include <mutex>
-#include <thread>
-
-#include <sys/types.h>
+#include <memory>
+#include <functional>
+#include <chrono>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 class ThQueue;
 
 class UdpClient {
 public:
+    enum class ConnectionState {
+        Disconnected,
+        Connecting,
+        Connected,
+        Failed
+    };
+    
     UdpClient(const std::string& ip, int port, bool debug = false);
     ~UdpClient();
-
+    
+    // Disable copy
+    UdpClient(const UdpClient&) = delete;
+    UdpClient& operator=(const UdpClient&) = delete;
+    
+    // Connection management
     bool initSocket();
     void disconnect();
-
+    bool isConnected() const;
+    ConnectionState getState() const;
+    
+    // Data transmission
     bool sendData(const std::string& data);
     std::string receiveData(int bufferSize = 1024);
-
-    std::string waiter(std::string expect, std::string to_send, int i = 0);
-
-    void setSend(std::string s);
-    void setReceive(std::string r);
-    void setRun(bool rn);
-
-    ThQueue *getSend();
-    ThQueue *getReceive();
-    bool getRun();
-    bool getDebug();
-
+    
+    // Advanced waiting with retry logic
+    struct WaitResult {
+        bool success;
+        std::string data;
+        int attempts;
+    };
+    WaitResult waitForResponse(
+        const std::string& expectedPrefix,
+        const std::string& messageToSend,
+        int maxAttempts = 5,
+        int timeoutMs = 2000
+    );
+    
+    // Queue management
+    void setSend(const std::string& data);
+    void setReceive(const std::string& data);
+    ThQueue* getSend();
+    ThQueue* getReceive();
+    
+    // Configuration
+    bool getDebug() const;
+    void setDebug(bool debug);
+    std::string getServerIp() const;
+    int getServerPort() const;
+    
+    // Statistics
+    struct Statistics {
+        size_t bytesSent{0};
+        size_t bytesReceived{0};
+        size_t packetsSent{0};
+        size_t packetsReceived{0};
+        size_t sendErrors{0};
+        size_t receiveErrors{0};
+        std::chrono::steady_clock::time_point lastSendTime;
+        std::chrono::steady_clock::time_point lastReceiveTime;
+    };
+    const Statistics& getStats() const;
+    void resetStats();
+    
 private:
     std::string _ip;
     int _port;
-    bool _debug;
-
     int _socket;
     bool _initialized;
-
-    struct sockaddr_in _serverAddr;
-    std::mutex _socketMutex;
-
-    ThQueue *_recive;
-    ThQueue *_send;
+    bool _debug;
+    ConnectionState _state;
+    
+    sockaddr_in _serverAddr;
+    mutable std::mutex _socketMutex;
+    mutable std::mutex _statsMutex;
+    
+    ThQueue* _send;
+    ThQueue* _recive;
+    
+    Statistics _stats;
+    
+    bool setSocketOptions();
+    void updateState(ConnectionState newState);
+    void recordSend(size_t bytes, bool success);
+    void recordReceive(size_t bytes, bool success);
 };
-
