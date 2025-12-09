@@ -255,6 +255,29 @@ void UdpServer::updateClient(const ClientInfo& client)
     }
 }
 
+bool UdpServer::setSocketOptions()
+{
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000;
+
+    if (setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        if (_debug) {
+            std::cerr << "Warning: Could not set SO_RCVTIMEO" << std::endl;
+        }
+    }
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+
+    if (setsockopt(_socket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
+        if (_debug) {
+            std::cerr << "Warning: Could not set SO_SNDTIMEO" << std::endl;
+        }
+    }
+
+    return true;
+}
+
 void UdpServer::removeClient(const std::string& clientKey)
 {
     std::lock_guard<std::mutex> lock(_clientMutex);

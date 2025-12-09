@@ -16,6 +16,7 @@ struct ClientInfo {
     int port;
     std::chrono::steady_clock::time_point lastSeen;
     
+    ClientInfo() = default; 
     ClientInfo(const sockaddr_in& addr);
     std::string getKey() const;
 };
@@ -64,13 +65,14 @@ private:
     bool _debug;
     
     sockaddr_in _serverAddr;
-    std::mutex _socketMutex;
-    std::mutex _clientMutex;
+    mutable std::mutex _socketMutex;
+    mutable std::mutex _clientMutex;
     
     ThQueue* _send;
     ThQueue* _recive;
     
     // Track connected clients
+    bool setSocketOptions();
     std::unordered_map<std::string, ClientInfo> _clients;
     std::unique_ptr<ClientInfo> _lastClient;
     

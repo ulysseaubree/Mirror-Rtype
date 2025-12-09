@@ -76,7 +76,6 @@ set(UTILS_SOURCES
 # ========================================
 # ECS Library (Static)
 # ========================================
-# Créer une bibliothèque statique pour l'ECS
 add_library(ecs_lib INTERFACE)
 
 target_include_directories(ecs_lib INTERFACE
@@ -89,22 +88,34 @@ target_link_libraries(ecs_lib INTERFACE
 )
 
 # ========================================
+# NETWORK LIB (NEW)
+# ========================================
+set(NETWORK_SOURCES
+    ${CMAKE_SOURCE_DIR}/network/src/threadQueue.cpp
+    ${CMAKE_SOURCE_DIR}/network/src/udpClient.cpp
+    ${CMAKE_SOURCE_DIR}/network/src/udpServer.cpp
+)
+
+add_library(network_lib STATIC ${NETWORK_SOURCES})
+
+target_include_directories(network_lib PUBLIC
+    ${CMAKE_SOURCE_DIR}/network/includes
+)
+
+# ========================================
 # SERVER
 # ========================================
 if(BUILD_SERVER)
-    # Chercher les sources du serveur
     file(GLOB_RECURSE SERVER_SOURCES 
         "${CMAKE_SOURCE_DIR}/server/*.cpp"
         "${CMAKE_SOURCE_DIR}/server/*.cc"
     )
     
-    # Si pas de sources, créer un main.cpp minimal
     if(NOT SERVER_SOURCES)
         set(SERVER_SOURCES "${CMAKE_SOURCE_DIR}/server/main.cpp")
         message(WARNING "Pas de sources serveur trouvées, main.cpp sera nécessaire")
     endif()
     
-    # Ajouter Utils.cpp si existe
     if(UTILS_SOURCES)
         list(APPEND SERVER_SOURCES ${UTILS_SOURCES})
     endif()
@@ -115,10 +126,13 @@ if(BUILD_SERVER)
         ${ECS_INCLUDE_DIRS}
         ${ASIO_INCLUDE_DIR}
         ${CMAKE_SOURCE_DIR}/server
+        # optionnel, si tu veux inclure directement "udpServer.hpp" etc.
+        ${CMAKE_SOURCE_DIR}/network/includes
     )
     
     target_link_libraries(r-type_server PRIVATE
         ecs_lib
+        network_lib      # <--- IMPORTANT
         Threads::Threads
         sfml-graphics
         sfml-system
@@ -135,19 +149,16 @@ endif()
 # CLIENT
 # ========================================
 if(BUILD_CLIENT)
-    # Chercher les sources du client
     file(GLOB_RECURSE CLIENT_SOURCES 
         "${CMAKE_SOURCE_DIR}/client/*.cpp"
         "${CMAKE_SOURCE_DIR}/client/*.cc"
     )
     
-    # Si pas de sources, créer un main.cpp minimal
     if(NOT CLIENT_SOURCES)
         set(CLIENT_SOURCES "${CMAKE_SOURCE_DIR}/client/main.cpp")
         message(WARNING "Pas de sources client trouvées, main.cpp sera nécessaire")
     endif()
     
-    # Ajouter Utils.cpp si existe
     if(UTILS_SOURCES)
         list(APPEND CLIENT_SOURCES ${UTILS_SOURCES})
     endif()
@@ -158,10 +169,12 @@ if(BUILD_CLIENT)
         ${ECS_INCLUDE_DIRS}
         ${ASIO_INCLUDE_DIR}
         ${CMAKE_SOURCE_DIR}/client
+        ${CMAKE_SOURCE_DIR}/network/includes
     )
     
     target_link_libraries(r-type_client PRIVATE
         ecs_lib
+        network_lib      # <--- IMPORTANT
         sfml-graphics
         sfml-window
         sfml-system
@@ -181,15 +194,7 @@ endif()
 # ========================================
 if(BUILD_TESTS)
     enable_testing()
-    
-    # Vous pouvez ajouter Google Test ou Catch2 ici
     message(STATUS "Tests enabled")
-    
-    # Exemple avec Catch2
-    # find_package(Catch2 REQUIRED)
-    # add_executable(ecs_tests tests/test_main.cpp tests/test_ecs.cpp)
-    # target_link_libraries(ecs_tests PRIVATE ecs_lib Catch2::Catch2)
-    # add_test(NAME ECSTests COMMAND ecs_tests)
 endif()
 
 # ========================================
@@ -223,7 +228,6 @@ if(BUILD_CLIENT)
         RUNTIME DESTINATION bin
     )
     
-    # Installer les assets si présents
     if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
         install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets"
             DESTINATION bin
