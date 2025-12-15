@@ -17,6 +17,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <cerrno>
 
 
 UdpClient::UdpClient(const std::string& ip, int port, bool debug)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <SFML/Graphics.hpp>
-#include "types.hpp"
+#include "../core/types.hpp"
 
 namespace ecs {
 
@@ -106,6 +106,10 @@ struct Spawner {
     float spawnOffsetY{0.f};
     float spawnVelocityX{0.f};
     float spawnVelocityY{100.f};
+};
+
+struct PlayerTag {
+    int clientId{}; // optionnel si tu veux un id joueur logique
 };
 
 }

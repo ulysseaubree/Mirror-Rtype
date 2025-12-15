@@ -14,13 +14,20 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_SERVER "Build the server" ON)
 option(BUILD_CLIENT "Build the client" ON)
 option(BUILD_TESTS "Build unit tests" OFF)
+option(USE_SFML "Enable SFML" ON)
 
 # ========================================
 # Dépendances
 # ========================================
 
 # SFML (pour le client et certains composants serveur)
-find_package(SFML 2.5 COMPONENTS graphics window system audio REQUIRED)
+find_package(SFML 3 COMPONENTS Graphics Window System Audio REQUIRED)
+get_property(_allTargets GLOBAL PROPERTY TARGETS)
+foreach(t ${_allTargets})
+  if(t MATCHES "SFML|sfml")
+    message(STATUS "Target visible: ${t}")
+  endif()
+endforeach()
 
 # ASIO (header-only pour le réseau)
 find_path(ASIO_INCLUDE_DIR asio.hpp
@@ -83,8 +90,8 @@ target_include_directories(ecs_lib INTERFACE
 )
 
 target_link_libraries(ecs_lib INTERFACE
-    sfml-graphics
-    sfml-system
+    $<$<BOOL:${USE_SFML}>:SFML::Graphics>
+    $<$<BOOL:${USE_SFML}>:SFML::System>
 )
 
 # ========================================
@@ -97,6 +104,7 @@ set(NETWORK_SOURCES
 )
 
 add_library(network_lib STATIC ${NETWORK_SOURCES})
+target_link_libraries(network_lib PUBLIC ecs_lib)
 
 target_include_directories(network_lib PUBLIC
     ${CMAKE_SOURCE_DIR}/network/includes
@@ -134,8 +142,8 @@ if(BUILD_SERVER)
         ecs_lib
         network_lib      # <--- IMPORTANT
         Threads::Threads
-        sfml-graphics
-        sfml-system
+        SFML::Graphics
+        SFML::System
     )
     
     set_target_properties(r-type_server PROPERTIES
@@ -174,12 +182,12 @@ if(BUILD_CLIENT)
     
     target_link_libraries(r-type_client PRIVATE
         ecs_lib
-        network_lib      # <--- IMPORTANT
-        sfml-graphics
-        sfml-window
-        sfml-system
-        sfml-audio
+        network_lib
         Threads::Threads
+        SFML::Graphics
+        SFML::Window
+        SFML::System
+        SFML::Audio
     )
     
     set_target_properties(r-type_client PROPERTIES

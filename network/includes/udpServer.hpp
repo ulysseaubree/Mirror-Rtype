@@ -1,12 +1,16 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <unordered_map>
 #include <mutex>
 #include <memory>
 #include <functional>
+#include <chrono>
 #include <sys/socket.h>
 #include <netinet/in.h>
+// Inclure les systèmes ECS pour fournir les pointeurs gMovementSystem, etc.
+#include "../../ecs/game/systems.hpp"
 
 class ThQueue;
 
@@ -76,4 +80,7 @@ private:
     std::unordered_map<std::string, ClientInfo> _clients;
     std::unique_ptr<ClientInfo> _lastClient;
     
+
 };
+
+void InitEcs();

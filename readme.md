@@ -1,6 +1,54 @@
-## ECS Skeleton Overview
+## R‑Type Defense 1 Prototype
 
-This project contains a compact, header-only Entity Component System (ECS) skeleton designed for a 2D networked shoot'em up (R-Type-like) developed in C++20 using only the standard library. The ECS layer is fully decoupled from rendering, networking, threading, and OS specifics so it can be shared between clients and servers.
+This repository contains a minimal yet functional R‑Type prototype designed for the first defense.  
+It demonstrates a clear separation between the **engine** (ECS, systems), **networking** (UDP authoritative server) and **rendering** (SFML). The goal is to provide a playable game loop over the network with clean architecture and documentation.
+
+### Binaries
+
+The project builds two executables via CMake :
+
+- `r-type_server` : authoritative UDP server handling physics, collisions, spawns and world state replication.  
+- `r-type_client` : graphical client using SFML. It displays a scrolling starfield, allows the player to move and shoot, and communicates with the server over UDP.
+
+### Build instructions (Linux)
+
+1. Install the dependencies (SFML ≥ 2.5, a C++17‑capable compiler, CMake ≥ 3.16).  
+2. Clone this repository and create a build directory:
+
+   ```bash
+   mkdir build && cd build
+   cmake ..
+   make -j
+   ```
+
+The binaries will be placed in `build/bin/`.
+
+### Running
+
+Start the server in one terminal:
+
+```bash
+./bin/r-type_server
+```
+
+Then start one or more clients in other terminals:
+
+```bash
+./bin/r-type_client    # optionally add IP and port arguments
+```
+
+Use the arrow keys to move your ship and spacebar to shoot. The server will replicate the position of your ship and spawn simple enemies that scroll from right to left.
+
+### Project Structure
+
+- `client/` : client application sources and headers. Contains a README with usage details.
+- `server/` : server logic (game loop, messaging, spawning). The main loop illustrates a clean separation between network I/O and game simulation.
+- `ecs/` : header‑only ECS framework with components and systems used by both client and server.
+- `network/` : UDP client/server wrappers and a simple thread‑safe queue.
+- `docs/` : additional documentation, including the description of the network protocol.
+- `tests/` : minimal tests validating parts of the networking layer.
+
+The original ECS skeleton documentation follows below.
 
 ### Files
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ecs.hpp"
+#include "../core/ecs.hpp"
 #include "components.hpp"
 #include <SFML/Graphics.hpp>
 #include <cmath>
@@ -456,8 +456,8 @@ public:
                 }
             } else {
                 // Clamp aux limites
-                transform.x = std::clamp(transform.x, boundary.minX, boundary.maxX);
-                transform.y = std::clamp(transform.y, boundary.minY, boundary.maxY);
+                transform.x = std::min(std::max(transform.x, boundary.minX), boundary.maxX);
+                transform.y = std::min(std::max(transform.y, boundary.minY), boundary.maxY);
             }
         }
     }
