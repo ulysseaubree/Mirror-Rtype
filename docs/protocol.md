@@ -1,77 +1,77 @@
-# R-Type Network Protocol (Defense 1)
+# R-Type Network Protocol (Defense 1)
 
-Le prototype utilise un protocole UDP simple avec des messages textuels terminés par `\r\n`.
-Chaque message commence par un mot‑clé identifiant son type, suivi de paramètres séparés par des espaces.
+The prototype uses a UDP text protocol where each message is terminated by `\r\n`.
+Every message starts with a keyword describing its type, followed by space-separated parameters.
 
-## Direction des messages
+## Message flow
 
-- **Client → Serveur** : envoi des intentions du joueur (connexion, entrées).  
-- **Serveur → Client** : envoi de l'état autoritaire du monde (positions, santé) et retour d'information.
+- **Client → Server**: sends player intent (connect, inputs).
+- **Server → Client**: sends the authoritative world state (positions, health) and acknowledgements.
 
 ## Messages
 
-### HELLO (Client → Serveur)
+### HELLO (Client → Server)
 
 ```text
 HELLO\r\n
 ```
 
-Annonce la connexion d'un client. Le serveur répond par un message `WELCOME` comportant l'identifiant attribué.
+Announces a new client connection. The server answers with a `WELCOME` message containing the assigned entity id.
 
-### WELCOME (Serveur → Client)
+### WELCOME (Server → Client)
 
 ```text
 WELCOME <entityId>\r\n
 ```
 
-Confirme la création ou la reconnexion d'un joueur et lui assigne l'entité `<entityId>` dans l'ECS serveur.
+Confirms the creation or reconnection of a player and assigns entity `<entityId>` inside the server ECS.
 
-### INPUT (Client → Serveur)
+### INPUT (Client → Server)
 
 ```text
 INPUT <direction> <fire>\r\n
 ```
 
-Transmet les commandes du joueur :
+Carries player commands:
 
-- `<direction>` : entier `1` à `9` selon le pavé numérique (1=bas‑gauche, 2=bas, 3=bas‑droite, 4=gauche, 5=aucun mouvement, 6=droite, 7=haut‑gauche, 8=haut, 9=haut‑droite).
-- `<fire>` : `0` pour ne pas tirer, `1` pour déclencher un tir.
+- `<direction>`: integer `1` to `9` using the numpad layout (1=down-left, 2=down, 3=down-right, 4=left, 5=idle, 6=right, 7=up-left, 8=up, 9=up-right).
+- `<fire>`: `0` for no shot, `1` to fire.
 
-Le serveur met à jour les composantes `PlayerInput` et transmettra la nouvelle position via un message `STATE`.
+The server updates the `PlayerInput` component and will broadcast the resolved position via `STATE`.
 
-### STATE (Serveur → Client)
+### STATE (Server → Client)
 
 ```text
 STATE <msgId> <tick> <entity> <x> <y> <health>\r\n
 ```
 
-Fournit l'état d'une entité à un instant `tick` :
+Describes the state of one entity during server tick `<tick>`:
 
-- `<msgId>` : identifiant unique du message (incremental). Les clients doivent envoyer un `ACK` pour chaque `msgId` reçu.
-- `<tick>` : compteur de tick du serveur, utile pour le debug.
-- `<entity>` : identifiant de l'entité (correspond à l'ID reçu dans `WELCOME`).
-- `<x> <y>` : position autoritaire de l'entité.
-- `<health>` : points de vie restants.
+- `<msgId>`: unique message id (incremental). Clients must send an `ACK` for each received id.
+- `<tick>`: server tick counter, useful for debugging.
+- `<entity>`: entity identifier (matches the id received in `WELCOME`).
+- `<x> <y>`: authoritative position.
+- `<health>`: remaining hit points.
 
-Dans ce MVP, seul le joueur reçoit son propre `STATE`, mais le protocole est extensible à plusieurs entités.
+In this MVP each player only receives their own `STATE`, but the format scales to multiple entities.
 
-### ACK (Client → Serveur)
+### ACK (Client → Server)
 
 ```text
 ACK <msgId>\r\n
 ```
 
-Accuse réception d'un message `STATE`. Le serveur peut alors retirer ce message de sa file et ne plus le renvoyer.
+Acknowledges a `STATE` so the server can drop it from its resend queue.
 
-### PING / PONG (Client ↔ Serveur)
+### PING / PONG (Client ↔ Server)
 
-Messages optionnels pour tester la connectivité :
+Optional connectivity probes:
 
 ```text
-PING\r\n   // Client ou serveur
-PONG\r\n   // Réponse
+PING\r\n   // Client or server
+PONG\r\n   // Reply
 ```
 
-## Gestion des erreurs
+## Error handling
 
-Le serveur ignore silencieusement les messages mal formatés ou inconnus. Les clients doivent gérer l'absence de réponse (timeout) en implémentant un mode dégradé. Aucune authentification n'est prévue dans ce MVP.
+The server silently ignores malformed or unknown messages. Clients should handle timeouts and fall back gracefully if no response arrives. No authentication is defined for this MVP.
