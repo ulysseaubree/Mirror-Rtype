@@ -118,9 +118,20 @@ private:
                 break;
                 
             case AIController::State::Patrolling:
-                // Simple patrol: déplacement lent aléatoire
-                velocity.vx = 50.f;
-                velocity.vy = 0.f;
+                // Simple patrol: move steadily to the left with a mild sine wave on Y to avoid
+                // predictable straight lines.  The speed and frequency are tuned to
+                // approximate the original R‑Type enemy behaviour.
+                velocity.vx = -80.f;
+                // Superimpose a vertical oscillation based on the entity's X position
+                // to create a gentle up/down movement.  We use a fixed amplitude and
+                // frequency for all enemies to avoid complexity.
+                {
+                    // Compute a phase from the current X coordinate.  Scaling by a small
+                    // factor yields a slow oscillation.  Adding an offset ensures the
+                    // oscillation is consistent across entities.
+                    float phase = transform.x * 0.05f;
+                    velocity.vy = std::sin(phase) * 40.f;
+                }
                 break;
                 
             case AIController::State::Chasing:

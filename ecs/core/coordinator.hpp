@@ -98,6 +98,11 @@ public:
         mSystemManager->SetSignature<T>(signature);
     }
 
+    Signature GetSignature(Entity entity)
+    {
+        return mEntityManager->GetSignature(entity);
+    }
+
 private:
     std::unique_ptr<EntityManager> mEntityManager{};
     std::unique_ptr<ComponentManager> mComponentManager{};

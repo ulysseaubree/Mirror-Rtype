@@ -1,5 +1,4 @@
 #include "../network/includes/udpServer.hpp"
-
 #include <csignal>
 #include <atomic>
 #include <thread>
@@ -23,6 +22,12 @@ std::shared_ptr<HealthSystem>   gHealthSystem;
 std::shared_ptr<LifetimeSystem> gLifetimeSystem;
 std::shared_ptr<SpawnerSystem>  gSpawnerSystem;
 std::shared_ptr<CollisionSystem> gCollisionSystem;
+
+// Global pointer to the AI system.  It is initialised in InitEcs() and
+// accessed from the game loop in server/main.cpp to drive enemy
+// behaviour.  Without registering and storing this system the AI
+// update will never run and enemies will remain static.
+std::shared_ptr<AISystem> gAISystem;
 
 void InitEcs()
 {
@@ -88,4 +93,18 @@ void InitEcs()
     sig.set(gCoordinator.GetComponentType<Damager>());
     sig.set(gCoordinator.GetComponentType<Health>());
     gCoordinator.SetSystemSignature<CollisionSystem>(sig);
+
+    // === Register AISystem ===
+    // The AI system controls behaviours for entities with an AIController
+    // component (e.g., enemies).  We include Transform and Velocity so
+    // the system can move entities, AIController for state, Health to
+    // respond to low hit points and Team to avoid attacking allies.
+    gAISystem = gCoordinator.RegisterSystem<AISystem>();
+    sig.reset();
+    sig.set(gCoordinator.GetComponentType<Transform>());
+    sig.set(gCoordinator.GetComponentType<Velocity>());
+    sig.set(gCoordinator.GetComponentType<AIController>());
+    sig.set(gCoordinator.GetComponentType<Health>());
+    sig.set(gCoordinator.GetComponentType<Team>());
+    gCoordinator.SetSystemSignature<AISystem>(sig);
 }
