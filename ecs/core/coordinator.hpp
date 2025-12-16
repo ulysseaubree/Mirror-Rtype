@@ -1,8 +1,8 @@
 #pragma once
 
 #include <memory>
-#include <queue>
 #include <utility>
+#include <vector>
 
 #include "component_manager.hpp"
 #include "entity_manager.hpp"
@@ -32,18 +32,19 @@ public:
         mEntityManager->DestroyEntity(entity);
     }
 
+    // Destruction différée pour éviter les problèmes lors de l'itération
     void RequestDestroyEntity(Entity entity)
     {
-        mEntitiesToDestroy.push(entity);
+        mEntitiesToDestroy.push_back(entity);
     }
 
+    // Traiter les destructions en attente
     void ProcessDestructions()
     {
-        while (!mEntitiesToDestroy.empty()) {
-            Entity entity = mEntitiesToDestroy.front();
-            mEntitiesToDestroy.pop();
+        for (Entity entity : mEntitiesToDestroy) {
             DestroyEntity(entity);
         }
+        mEntitiesToDestroy.clear();
     }
 
     template <typename T>
@@ -86,6 +87,12 @@ public:
         return mComponentManager->GetComponentType<T>();
     }
 
+    // Récupérer la signature d'une entité
+    Signature GetSignature(Entity entity) const
+    {
+        return mEntityManager->GetSignature(entity);
+    }
+
     template <typename T, typename... Args>
     std::shared_ptr<T> RegisterSystem(Args&&... args)
     {
@@ -98,16 +105,11 @@ public:
         mSystemManager->SetSignature<T>(signature);
     }
 
-    Signature GetSignature(Entity entity)
-    {
-        return mEntityManager->GetSignature(entity);
-    }
-
 private:
     std::unique_ptr<EntityManager> mEntityManager{};
     std::unique_ptr<ComponentManager> mComponentManager{};
     std::unique_ptr<SystemManager> mSystemManager{};
-    std::queue<Entity> mEntitiesToDestroy{};
+    std::vector<Entity> mEntitiesToDestroy{};
 };
 
 } // namespace ecs

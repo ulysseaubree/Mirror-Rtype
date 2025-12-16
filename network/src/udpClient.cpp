@@ -185,7 +185,7 @@ bool UdpClient::sendData(const std::string& data)
     recordSend(bytes_sent, true);
     
     if (_debug) {
-        std::cout << "Envoyé: " << data << " (" << bytes_sent << " octets)" << std::endl;
+        // std::cout << "Envoyé: " << data << " (" << bytes_sent << " octets)" << std::endl;
     }
     
     return true;

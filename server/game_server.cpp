@@ -85,13 +85,11 @@ void InitEcs()
     sig.set(gCoordinator.GetComponentType<Transform>());
     gCoordinator.SetSystemSignature<SpawnerSystem>(sig);
 
-    gCollisionSystem = gCoordinator.RegisterSystem<CollisionSystem>();
+   gCollisionSystem = gCoordinator.RegisterSystem<CollisionSystem>();
     sig.reset();
     sig.set(gCoordinator.GetComponentType<Transform>());
     sig.set(gCoordinator.GetComponentType<Collider>());
     sig.set(gCoordinator.GetComponentType<Team>());
-    sig.set(gCoordinator.GetComponentType<Damager>());
-    sig.set(gCoordinator.GetComponentType<Health>());
     gCoordinator.SetSystemSignature<CollisionSystem>(sig);
 
     // === Register AISystem ===

@@ -314,7 +314,7 @@ std::string HandleMessageFromClient(
                     }),
                 pendingMessages.end()
             );
-            std::cout << "[Server] ACK received for message ID " << ackId << std::endl;
+            // std::cout << "[Server] ACK received for message ID " << ackId << std::endl;
         }
         return "";
     }
@@ -344,7 +344,7 @@ static void RunServerLoop(UdpServer& server)
     int nextMsgId = 0;
     uint64_t tick = 0;
     float enemySpawnTimer = 0.f;
-    const float enemySpawnInterval = 2.f;
+    const float enemySpawnInterval = 8.f;
     auto lastTime = std::chrono::high_resolution_clock::now();
     const float fixedDt = 1.f / 60.f;
     float accumulator = 0.f;
@@ -523,14 +523,14 @@ int main()
 
     InitEcs();
 
-    std::cout << "[Server] Ready on port " << server.getPort()
-              << " (press Ctrl+C to quit)" << std::endl;
+    // std::cout << "[Server] Ready on port " << server.getPort()
+    //           << " (press Ctrl+C to quit)" << std::endl;
 
     // Invoke the new authoritative server loop.  This will run until
     // g_running becomes false (e.g., when SIGINT is received).
     RunServerLoop(server);
 
-    std::cout << "\n[Server] Shutting down..." << std::endl;
+    // std::cout << "\n[Server] Shutting down..." << std::endl;
     server.disconnect();
     return 0;
 }

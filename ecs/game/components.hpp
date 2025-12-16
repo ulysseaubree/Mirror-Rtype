@@ -1,7 +1,7 @@
 #pragma once
 
 #include <SFML/Graphics.hpp>
-#include "../core/types.hpp"
+#include "types.hpp"
 
 namespace ecs {
 
@@ -53,17 +53,15 @@ struct Boundary {
     bool destroy{true};
 };
 
-// PlayerInput: Stocke la direction d'input (1-9, numpad style)
-// 7 8 9
-// 4 5 6  (5 = pas de mouvement)
-// 1 2 3
+// Composants pour le gameplay serveur
+
 struct PlayerInput {
-    int direction{5};
+    int direction{5};  // 1-9 (numpad layout), 5 = neutre
     bool firePressed{false};
 };
 
 struct Team {
-    int teamID{0};
+    int teamID{0};  // 0 = joueurs, 1 = ennemis, 2 = neutre
 };
 
 struct Damager {
@@ -80,13 +78,14 @@ struct AIController {
     };
     
     State currentState{State::Idle};
-    Entity target{MAX_ENTITIES};
-    float decisionTimer{0.f};
-    float decisionCooldown{1.0f}; // Temps entre les décisions
+    Entity target{MAX_ENTITIES};  // Cible actuelle (MAX_ENTITIES = pas de cible)
     
-    float detectionRange{200.f};
-    float attackRange{50.f};
-    float fleeHealthThreshold{0.3f}; // Fuit si santé < 30%
+    float detectionRange{300.f};   // Distance de détection
+    float attackRange{50.f};        // Distance d'attaque
+    float fleeHealthThreshold{0.3f}; // Fuit si HP < 30%
+    
+    float decisionTimer{0.f};       // Timer pour les décisions
+    float decisionCooldown{1.f};    // Intervalle entre décisions
 };
 
 struct Spawner {
@@ -97,19 +96,24 @@ struct Spawner {
     };
     
     SpawnType typeToSpawn{SpawnType::Projectile};
-    float spawnCooldown{1.0f};
-    float spawnTimer{0.f};
-    int maxSpawns{-1};
-    int spawnCount{0};
     
+    float spawnTimer{0.f};
+    float spawnCooldown{2.f};
+    
+    int spawnCount{0};
+    int maxSpawns{-1};  // -1 = infini
+    
+    // Offset de spawn par rapport au spawner
     float spawnOffsetX{0.f};
     float spawnOffsetY{0.f};
+    
+    // Vélocité initiale des entités spawnées
     float spawnVelocityX{0.f};
-    float spawnVelocityY{100.f};
+    float spawnVelocityY{0.f};
 };
 
 struct PlayerTag {
-    int clientId{}; // optionnel si tu veux un id joueur logique
+    int clientId{0};
 };
 
 }

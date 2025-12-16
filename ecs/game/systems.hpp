@@ -4,6 +4,7 @@
 #include "components.hpp"
 #include <SFML/Graphics.hpp>
 #include <cmath>
+#include <iostream>
 #include <algorithm>
 
 namespace ecs {
@@ -392,7 +393,16 @@ private:
     }
     
     void ResolveCollision(Entity e1, Entity e2) {
-        // Récupérer les teams
+        // Vérifier que les deux entités ont le composant Team
+        Signature sig1 = gCoordinator.GetSignature(e1);
+        Signature sig2 = gCoordinator.GetSignature(e2);
+        
+        ComponentType teamType = gCoordinator.GetComponentType<Team>();
+        ComponentType damagerType = gCoordinator.GetComponentType<Damager>();
+        ComponentType healthType = gCoordinator.GetComponentType<Health>();
+        ComponentType colliderType = gCoordinator.GetComponentType<Collider>();
+        
+        // Les deux doivent avoir Team (déjà garanti par la signature du système)
         auto& team1 = gCoordinator.GetComponent<Team>(e1);
         auto& team2 = gCoordinator.GetComponent<Team>(e2);
         
@@ -400,31 +410,41 @@ private:
         if (team1.teamID == team2.teamID) return;
         
         // Vérifier si e1 peut endommager e2
-        auto& damager1 = gCoordinator.GetComponent<Damager>(e1);
-        auto& health2 = gCoordinator.GetComponent<Health>(e2);
+        bool e1HasDamager = sig1.test(damagerType);
+        bool e2HasHealth = sig2.test(healthType);
         
-        if (damager1.damage > 0 && !health2.invincible && health2.invincibilityTimer <= 0.f) {
-            health2.current -= damager1.damage;
-            health2.invincibilityTimer = 0.5f; // 0.5s d'invincibilité
+        if (e1HasDamager && e2HasHealth) {
+            auto& damager1 = gCoordinator.GetComponent<Damager>(e1);
+            auto& health2 = gCoordinator.GetComponent<Health>(e2);
             
-            // Détruire le projectile après impact
-            auto& collider1 = gCoordinator.GetComponent<Collider>(e1);
-            if (!collider1.isTrigger) {
-                gCoordinator.RequestDestroyEntity(e1);
+            if (damager1.damage > 0 && !health2.invincible && health2.invincibilityTimer <= 0.f) {
+                health2.current -= damager1.damage;
+                health2.invincibilityTimer = 0.5f; // 0.5s d'invincibilité
+                
+                // Détruire le projectile après impact
+                auto& collider1 = gCoordinator.GetComponent<Collider>(e1);
+                if (!collider1.isTrigger) {
+                    gCoordinator.RequestDestroyEntity(e1);
+                }
             }
         }
         
         // Vérifier si e2 peut endommager e1 (collision bidirectionnelle)
-        auto& damager2 = gCoordinator.GetComponent<Damager>(e2);
-        auto& health1 = gCoordinator.GetComponent<Health>(e1);
+        bool e2HasDamager = sig2.test(damagerType);
+        bool e1HasHealth = sig1.test(healthType);
         
-        if (damager2.damage > 0 && !health1.invincible && health1.invincibilityTimer <= 0.f) {
-            health1.current -= damager2.damage;
-            health1.invincibilityTimer = 0.5f;
+        if (e2HasDamager && e1HasHealth) {
+            auto& damager2 = gCoordinator.GetComponent<Damager>(e2);
+            auto& health1 = gCoordinator.GetComponent<Health>(e1);
             
-            auto& collider2 = gCoordinator.GetComponent<Collider>(e2);
-            if (!collider2.isTrigger) {
-                gCoordinator.RequestDestroyEntity(e2);
+            if (damager2.damage > 0 && !health1.invincible && health1.invincibilityTimer <= 0.f) {
+                health1.current -= damager2.damage;
+                health1.invincibilityTimer = 0.5f;
+                
+                auto& collider2 = gCoordinator.GetComponent<Collider>(e2);
+                if (!collider2.isTrigger) {
+                    gCoordinator.RequestDestroyEntity(e2);
+                }
             }
         }
     }

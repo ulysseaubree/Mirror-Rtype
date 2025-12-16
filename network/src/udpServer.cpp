@@ -81,7 +81,7 @@ bool UdpServer::initSocket()
     _initialized = true;
     
     if (_debug) {
-        std::cout << "Serveur UDP démarré sur le port " << _port << std::endl;
+        // std::cout << "Serveur UDP démarré sur le port " << _port << std::endl;
     }
     
     return true;
@@ -111,8 +111,8 @@ bool UdpServer::sendData(const std::string& data, const ClientInfo& client)
     }
     
     if (_debug) {
-        std::cout << "Envoyé à " << client.getKey() << " : " 
-                  << data << " (" << bytes_sent << " octets)" << std::endl;
+        // std::cout << "Envoyé à " << client.getKey() << " : " 
+        //           << data << " (" << bytes_sent << " octets)" << std::endl;
     }
     
     return true;
@@ -124,7 +124,7 @@ bool UdpServer::broadcast(const std::string& data)
     
     if (_clients.empty()) {
         if (_debug) {
-            std::cout << "Aucun client pour le broadcast." << std::endl;
+            // std::cout << "Aucun client pour le broadcast." << std::endl;
         }
         return false;
     }
@@ -185,7 +185,7 @@ std::string UdpServer::receiveData(int bufferSize)
     updateClient(*_lastClient);
     
     if (_debug) {
-        std::cout << "Reçu de " << _lastClient->getKey() << " : " << data << std::endl;
+        // std::cout << "Reçu de " << _lastClient->getKey() << " : " << data << std::endl;
     }
     
     return data;
@@ -200,7 +200,7 @@ void UdpServer::disconnect()
         _initialized = false;
         
         if (_debug) {
-            std::cout << "Serveur UDP arrêté." << std::endl;
+            // std::cout << "Serveur UDP arrêté." << std::endl;
         }
     }
 }
@@ -250,7 +250,7 @@ void UdpServer::updateClient(const ClientInfo& client)
     } else {
         _clients[key] = client;
         if (_debug) {
-            std::cout << "Nouveau client connecté : " << key << std::endl;
+            // std::cout << "Nouveau client connecté : " << key << std::endl;
         }
     }
 }
@@ -286,7 +286,7 @@ void UdpServer::removeClient(const std::string& clientKey)
     if (it != _clients.end()) {
         _clients.erase(it);
         if (_debug) {
-            std::cout << "Client déconnecté : " << clientKey << std::endl;
+            // std::cout << "Client déconnecté : " << clientKey << std::endl;
         }
     }
 }
@@ -305,7 +305,7 @@ std::vector<ClientInfo> UdpServer::getActiveClients(int timeoutSeconds)
         
         if (elapsed > timeoutSeconds) {
             if (_debug) {
-                std::cout << "Client timeout : " << it->first << std::endl;
+                // std::cout << "Client timeout : " << it->first << std::endl;
             }
             it = _clients.erase(it);
         } else {
