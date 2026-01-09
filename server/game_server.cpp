@@ -5,6 +5,10 @@
 #include <chrono>
 #include <iostream>
 
+#ifdef ENABLE_LUA_SCRIPTING
+#include "script_engine.hpp"
+#endif
+
 using namespace ecs;
 
 //
@@ -29,6 +33,10 @@ std::shared_ptr<CollisionSystem> gCollisionSystem;
 // update will never run and enemies will remain static.
 std::shared_ptr<AISystem> gAISystem;
 
+// Global pointer to the Scripting system. Manages Lua scripts for entities.
+// Entities with a ScriptComponent will have their Lua callbacks invoked.
+std::shared_ptr<ScriptingSystem> gScriptingSystem;
+
 void InitEcs()
 {
     // Initialise the global coordinator. This sets up entity and component managers.
@@ -47,6 +55,7 @@ void InitEcs()
     gCoordinator.RegisterComponent<Collider>();
     gCoordinator.RegisterComponent<Spawner>();
     gCoordinator.RegisterComponent<PlayerTag>();
+    gCoordinator.RegisterComponent<ScriptComponent>();  // For Lua scripting
 
     // === Register Systems + signatures ===
     Signature sig;
@@ -105,4 +114,15 @@ void InitEcs()
     sig.set(gCoordinator.GetComponentType<Health>());
     sig.set(gCoordinator.GetComponentType<Team>());
     gCoordinator.SetSystemSignature<AISystem>(sig);
+
+    // === Register ScriptingSystem ===
+    // The scripting system executes Lua scripts attached to entities via
+    // ScriptComponent. It calls on_init, on_update, on_collision, etc.
+    gScriptingSystem = gCoordinator.RegisterSystem<ScriptingSystem>();
+    sig.reset();
+    sig.set(gCoordinator.GetComponentType<ScriptComponent>());
+    gCoordinator.SetSystemSignature<ScriptingSystem>(sig);
+    
+    // Initialize the scripting engine with the scripts directory
+    gScriptingSystem->Init("scripts/");
 }

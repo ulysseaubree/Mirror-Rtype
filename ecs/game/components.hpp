@@ -2,6 +2,9 @@
 
 #include <SFML/Graphics.hpp>
 #include "types.hpp"
+#include <string>
+#include <unordered_map>
+#include <variant>
 
 namespace ecs {
 
@@ -114,6 +117,60 @@ struct Spawner {
 
 struct PlayerTag {
     int clientId{0};
+};
+
+// ========================================
+// Scripting Component (Lua)
+// ========================================
+
+/**
+ * @brief Component that attaches a Lua script to an entity.
+ * 
+ * Scripts can define callbacks that are invoked by the ScriptingSystem:
+ * - on_init(entity)      : Called once when the entity is created
+ * - on_update(entity, dt): Called every frame with delta time
+ * - on_collision(entity, other): Called when colliding with another entity
+ * - on_damage(entity, amount): Called when the entity takes damage
+ * - on_death(entity)     : Called when the entity is destroyed
+ * 
+ * Scripts can also store custom variables in the 'variables' map
+ * that persist across frames and can be modified from C++.
+ */
+struct ScriptComponent {
+    // Path to the Lua script file (relative to scripts/ folder)
+    std::string scriptPath{};
+    
+    // Has the script been initialized (on_init called)?
+    bool initialized{false};
+    
+    // Is the script currently enabled?
+    bool enabled{true};
+    
+    // Custom variables that can be set from C++ and accessed in Lua
+    // Supports: float, int, bool, string
+    using ScriptVar = std::variant<float, int, bool, std::string>;
+    std::unordered_map<std::string, ScriptVar> variables{};
+    
+    // Internal: Lua state reference (managed by ScriptingSystem)
+    // Using void* to avoid Lua header dependency in components
+    void* luaStateRef{nullptr};
+    
+    // Helper methods to set/get variables
+    void setVar(const std::string& name, float value) { variables[name] = value; }
+    void setVar(const std::string& name, int value) { variables[name] = value; }
+    void setVar(const std::string& name, bool value) { variables[name] = value; }
+    void setVar(const std::string& name, const std::string& value) { variables[name] = value; }
+    
+    template<typename T>
+    T getVar(const std::string& name, T defaultValue = T{}) const {
+        auto it = variables.find(name);
+        if (it != variables.end()) {
+            if (auto* val = std::get_if<T>(&it->second)) {
+                return *val;
+            }
+        }
+        return defaultValue;
+    }
 };
 
 }

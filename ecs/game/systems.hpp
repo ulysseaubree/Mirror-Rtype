@@ -512,4 +512,139 @@ public:
     }
 };
 
+// ========================================
+// Scripting System (Lua)
+// ========================================
+
+#ifdef ENABLE_LUA_SCRIPTING
+#include "script_engine.hpp"
+
+/**
+ * @brief System that executes Lua scripts attached to entities.
+ * 
+ * This system iterates over all entities with a ScriptComponent and
+ * calls the appropriate Lua callbacks:
+ * - on_init: Called once when the entity is first processed
+ * - on_update: Called every frame with delta time
+ * 
+ * Other callbacks (on_collision, on_damage, on_death) are called
+ * directly by the relevant systems (CollisionSystem, HealthSystem, etc.)
+ */
+class ScriptingSystem : public System {
+public:
+    /**
+     * @brief Initialize the scripting system.
+     * @param scriptsPath Base directory for Lua scripts
+     * @return true if initialization succeeded
+     */
+    bool Init(const std::string& scriptsPath = "scripts/") {
+        if (!gScriptEngine.isInitialized()) {
+            return gScriptEngine.init(scriptsPath);
+        }
+        return true;
+    }
+    
+    /**
+     * @brief Shutdown the scripting system.
+     */
+    void Shutdown() {
+        gScriptEngine.shutdown();
+    }
+    
+    /**
+     * @brief Update all scripted entities.
+     * @param dt Delta time since last frame
+     */
+    void Update(float dt) {
+        for (Entity entity : entities) {
+            auto& script = gCoordinator.GetComponent<ScriptComponent>(entity);
+            
+            if (!script.enabled || script.scriptPath.empty()) {
+                continue;
+            }
+            
+            // Call on_init if this is the first update
+            if (!script.initialized) {
+                gScriptEngine.callEntityFunction(script.scriptPath, "on_init", entity);
+                script.initialized = true;
+            }
+            
+            // Call on_update every frame
+            gScriptEngine.callUpdate(script.scriptPath, entity, dt);
+        }
+    }
+    
+    /**
+     * @brief Notify a scripted entity of a collision.
+     * Called by CollisionSystem when a collision is detected.
+     */
+    void NotifyCollision(Entity entity, Entity other) {
+        try {
+            auto& script = gCoordinator.GetComponent<ScriptComponent>(entity);
+            if (script.enabled && !script.scriptPath.empty()) {
+                gScriptEngine.callCollision(script.scriptPath, entity, other);
+            }
+        } catch (...) {
+            // Entity doesn't have a script component
+        }
+    }
+    
+    /**
+     * @brief Notify a scripted entity of damage taken.
+     * Called by HealthSystem or CollisionSystem when damage is applied.
+     */
+    void NotifyDamage(Entity entity, int amount) {
+        try {
+            auto& script = gCoordinator.GetComponent<ScriptComponent>(entity);
+            if (script.enabled && !script.scriptPath.empty()) {
+                gScriptEngine.callDamage(script.scriptPath, entity, amount);
+            }
+        } catch (...) {
+            // Entity doesn't have a script component
+        }
+    }
+    
+    /**
+     * @brief Notify a scripted entity of its imminent destruction.
+     * Called before an entity is destroyed.
+     */
+    void NotifyDeath(Entity entity) {
+        try {
+            auto& script = gCoordinator.GetComponent<ScriptComponent>(entity);
+            if (script.enabled && !script.scriptPath.empty()) {
+                gScriptEngine.callEntityFunction(script.scriptPath, "on_death", entity);
+            }
+        } catch (...) {
+            // Entity doesn't have a script component
+        }
+    }
+    
+    /**
+     * @brief Reload all scripts (useful for hot-reloading during development).
+     */
+    void ReloadScripts() {
+        gScriptEngine.reloadAllScripts();
+        
+        // Reset initialized flag on all script components
+        for (Entity entity : entities) {
+            auto& script = gCoordinator.GetComponent<ScriptComponent>(entity);
+            script.initialized = false;
+        }
+    }
+};
+
+#else
+// Stub implementation when Lua is disabled
+class ScriptingSystem : public System {
+public:
+    bool Init(const std::string& = "scripts/") { return true; }
+    void Shutdown() {}
+    void Update(float) {}
+    void NotifyCollision(Entity, Entity) {}
+    void NotifyDamage(Entity, int) {}
+    void NotifyDeath(Entity) {}
+    void ReloadScripts() {}
+};
+#endif // ENABLE_LUA_SCRIPTING
+
 }

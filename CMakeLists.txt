@@ -55,6 +55,54 @@ message(STATUS "ASIO include: ${ASIO_INCLUDE_DIR}")
 find_package(Threads REQUIRED)
 
 # ========================================
+# Lua (for scripting)
+# ========================================
+option(ENABLE_SCRIPTING "Enable Lua scripting support" ON)
+
+if(ENABLE_SCRIPTING)
+    # Try to find Lua locally first
+    find_package(Lua 5.4 QUIET)
+    
+    if(NOT LUA_FOUND)
+        find_package(Lua 5.3 QUIET)
+    endif()
+    
+    if(NOT LUA_FOUND)
+        message(STATUS "Lua not found locally, downloading via FetchContent...")
+        include(FetchContent)
+        FetchContent_Declare(
+            lua
+            GIT_REPOSITORY https://github.com/lua/lua.git
+            GIT_TAG v5.4.7
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(lua)
+        
+        # Build Lua as a static library
+        set(LUA_SRC_DIR ${lua_SOURCE_DIR})
+        file(GLOB LUA_CORE_SOURCES ${LUA_SRC_DIR}/*.c)
+        # Remove lua.c and luac.c (standalone interpreters)
+        list(FILTER LUA_CORE_SOURCES EXCLUDE REGEX "lua\\.c$")
+        list(FILTER LUA_CORE_SOURCES EXCLUDE REGEX "luac\\.c$")
+        
+        add_library(lua_static STATIC ${LUA_CORE_SOURCES})
+        target_include_directories(lua_static PUBLIC ${LUA_SRC_DIR})
+        if(UNIX)
+            target_compile_definitions(lua_static PRIVATE LUA_USE_POSIX)
+            target_link_libraries(lua_static PRIVATE m dl)
+        endif()
+        
+        set(LUA_INCLUDE_DIR ${LUA_SRC_DIR})
+        set(LUA_LIBRARIES lua_static)
+    else()
+        message(STATUS "Found Lua: ${LUA_VERSION_STRING}")
+    endif()
+    
+    message(STATUS "Lua include: ${LUA_INCLUDE_DIR}")
+    add_compile_definitions(ENABLE_LUA_SCRIPTING)
+endif()
+
+# ========================================
 # Définitions globales
 # ========================================
 add_compile_definitions(
@@ -71,6 +119,7 @@ set(ECS_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/ecs/game
     ${CMAKE_SOURCE_DIR}/ecs/network
     ${CMAKE_SOURCE_DIR}/ecs/utils
+    ${CMAKE_SOURCE_DIR}/scripting/include
 )
 
 # ========================================
@@ -111,6 +160,30 @@ target_include_directories(network_lib PUBLIC
 )
 
 # ========================================
+# SCRIPTING LIB (Lua bindings)
+# ========================================
+if(ENABLE_SCRIPTING)
+    set(SCRIPTING_SOURCES
+        ${CMAKE_SOURCE_DIR}/scripting/src/script_engine.cpp
+        ${CMAKE_SOURCE_DIR}/scripting/src/lua_bindings.cpp
+    )
+    
+    add_library(scripting_lib STATIC ${SCRIPTING_SOURCES})
+    
+    target_include_directories(scripting_lib PUBLIC
+        ${CMAKE_SOURCE_DIR}/scripting/include
+        ${LUA_INCLUDE_DIR}
+    )
+    
+    target_link_libraries(scripting_lib PUBLIC
+        ecs_lib
+        ${LUA_LIBRARIES}
+    )
+    
+    message(STATUS "✓ Scripting library configured")
+endif()
+
+# ========================================
 # SERVER
 # ========================================
 if(BUILD_SERVER)
@@ -140,7 +213,8 @@ if(BUILD_SERVER)
     
     target_link_libraries(r-type_server PRIVATE
         ecs_lib
-        network_lib      # <--- IMPORTANT
+        network_lib
+        $<$<BOOL:${ENABLE_SCRIPTING}>:scripting_lib>
         Threads::Threads
         SFML::Graphics
         SFML::System
@@ -276,6 +350,7 @@ message(STATUS "Build Server:     ${BUILD_SERVER}")
 message(STATUS "Build Client:     ${BUILD_CLIENT}")
 message(STATUS "Build Tests:      ${BUILD_TESTS}")
 message(STATUS "Build Docs:       ${BUILD_DOCS}")
+message(STATUS "Scripting (Lua):  ${ENABLE_SCRIPTING}")
 message(STATUS "SFML found:       ${SFML_FOUND}")
 message(STATUS "ASIO include:     ${ASIO_INCLUDE_DIR}")
 message(STATUS "==========================================")

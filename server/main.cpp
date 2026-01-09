@@ -37,6 +37,10 @@ extern std::shared_ptr<LifetimeSystem> gLifetimeSystem;
 // translation unit.
 extern std::shared_ptr<AISystem> gAISystem;
 
+// Forward declare the Scripting system pointer defined in game_server.cpp.
+// This enables Lua scripts to run for entities with ScriptComponent.
+extern std::shared_ptr<ScriptingSystem> gScriptingSystem;
+
 std::unordered_map<std::string, ecs::Entity> gClientToEntity;
 
 // Liste globale des ennemis générés côté serveur. Chaque ennemi est une entité ECS
@@ -406,6 +410,7 @@ static void RunServerLoop(UdpServer& server)
             // Systems
             gInputSystem->Update();
             if (gAISystem) gAISystem->Update(fixedDt);
+            if (gScriptingSystem) gScriptingSystem->Update(fixedDt);  // Lua scripts
             gMovementSystem->Update(fixedDt);
             gBoundarySystem->Update();
             gSpawnerSystem->Update(fixedDt);
