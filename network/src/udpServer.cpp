@@ -207,13 +207,11 @@ void UdpServer::disconnect()
 
 void UdpServer::setSend(const std::string& data, const std::string& clientKey)
 {
-    std::string formatted = data;
-    if (formatted.size() < 2 || formatted.substr(formatted.size() - 2) != "\r\n") {
-        formatted += "\r\n";
-    }
-    
+    // Preserve data as binary without appending CR/LF.  Prepend the
+    // client key using a delimiter so the send thread knows to whom
+    // the packet is destined.
     std::lock_guard<std::mutex> lock(_socketMutex);
-    _send->push(clientKey + "|" + formatted);
+    _send->push(clientKey + "|" + data);
 }
 
 void UdpServer::setReceive(const std::string& data)

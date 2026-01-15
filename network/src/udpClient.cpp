@@ -329,13 +329,10 @@ UdpClient::WaitResult UdpClient::waitForResponse(
 
 void UdpClient::setSend(const std::string& data)
 {
-    std::string formatted = data;
-    if (formatted.size() < 2 || formatted.substr(formatted.size() - 2) != "\r\n") {
-        formatted += "\r\n";
-    }
-    
+    // In the binary protocol we preserve the data exactly as provided.
+    // Do not append CR/LF as was done in the textual protocol.
     std::lock_guard<std::mutex> lock(_socketMutex);
-    _send->push(formatted);
+    _send->push(data);
 }
 
 void UdpClient::setReceive(const std::string& data)

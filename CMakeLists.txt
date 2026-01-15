@@ -101,6 +101,7 @@ set(NETWORK_SOURCES
     ${CMAKE_SOURCE_DIR}/network/src/threadQueue.cpp
     ${CMAKE_SOURCE_DIR}/network/src/udpClient.cpp
     ${CMAKE_SOURCE_DIR}/network/src/udpServer.cpp
+    ${CMAKE_SOURCE_DIR}/network/src/protocol.cpp
 )
 
 add_library(network_lib STATIC ${NETWORK_SOURCES})

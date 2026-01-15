@@ -4,38 +4,9 @@
 ** File description:
 ** Client prototype for Defense 1.
 **
-** Ce client crée une fenêtre SFML avec un fond étoilé (starfield), un vaisseau
-** contrôlé par l'utilisateur et un réseau minimal pour envoyer les entrées au
-** serveur et recevoir les états du monde. L'architecture est volontairement
-** simple : le but est de disposer d'un prototype jouable et présentable pour
-** la soutenance. Le réseau utilise un modèle serveur autoritaire :
-** chaque frame, le client envoie ses commandes (direction, tir) et applique
-** localement les positions envoyées par le serveur pour les entités qu'il
-** possède.
 */
 
-#include "../network/includes/udpClient.hpp"
-
-#include <SFML/Graphics.hpp>
-#include <csignal>
-#include <atomic>
-#include <thread>
-#include <chrono>
-#include <iostream>
-#include <vector>
-#include <algorithm>
-#include <random>
-#include <cstdlib>
-#include <sstream>
-#include <limits>
-
-// Containers for tracking networked entities and their states.
-#include <unordered_map>
-#include <unordered_set>
-#include <memory>
-#include <cmath>
-
-static std::atomic_bool g_running{true};
+#include "client.hpp"
 
 static void signal_handler(int)
 {
@@ -92,11 +63,6 @@ int main(int ac, char **av)
     sf::CircleShape starShape(1.f);
     starShape.setFillColor(sf::Color::White);
 
-    // Containers for dynamic entities.  Each network id is mapped to a
-    // unique pointer holding its SFML shape.  Additional maps store
-    // the type ('P', 'E', 'B'), the health and the authoritative and
-    // rendered positions to support interpolation.  The local player's
-    // network id (localNetId) is assigned after the handshake.
     std::unordered_map<unsigned, std::unique_ptr<sf::Shape>> entities;
     std::unordered_map<unsigned, char> entityTypes;
     std::unordered_map<unsigned, int> entityHealth;
@@ -112,52 +78,52 @@ int main(int ac, char **av)
         std::cerr << "[Client] Failed to initialize UDP client" << std::endl;
         // Mode hors ligne possible
     } else {
-        // Handshake : envoyer HELLO et attendre une réponse WELCOME <id>
-        client.sendData("HELLO\r\n");
+        // Binary handshake: send HELLO and wait for WELCOME packet
+        client.sendData(protocol::encodeHello());
         bool gotWelcome = false;
         auto start = std::chrono::steady_clock::now();
         while (!gotWelcome) {
             std::string resp = client.receiveData(1024);
-            if (!resp.empty() && resp.rfind("WELCOME", 0) == 0) {
-                std::cout << resp;
-                std::istringstream iss(resp);
-                std::string kw; unsigned id;
-                if (iss >> kw >> id) {
-                    localNetId = id;
-                    // Créer la forme locale
-                    auto shape = std::make_unique<sf::RectangleShape>(sf::Vector2f{30.f, 20.f});
-                    shape->setOrigin(shape->getSize() / 2.f);
-                    shape->setFillColor(sf::Color::Cyan);
-                    shape->setPosition({100.f, window.getSize().y / 2.f});
-                    entities[id] = std::move(shape);
-                    entityTypes[id] = 'P';
-                    entityHealth[id] = 1; // provisoire
-                    sf::Vector2f pos = entities[id]->getPosition();
-                    serverPositions[id] = pos;
-                    renderPositions[id] = pos;
+            if (!resp.empty()) {
+                if (resp.size() >= sizeof(protocol::PacketHeader)) {
+                    protocol::PacketHeader hdr;
+                    if (protocol::decodeHeader(reinterpret_cast<const uint8_t*>(resp.data()), resp.size(), hdr)) {
+                        if (hdr.version == protocol::PROTOCOL_VERSION && static_cast<protocol::Opcode>(hdr.opcode) == protocol::Opcode::WELCOME) {
+                            uint32_t pid;
+                            if (protocol::decodeWelcome(reinterpret_cast<const uint8_t*>(resp.data()) + sizeof(protocol::PacketHeader), hdr.length, pid)) {
+                                localNetId = pid;
+                                // Create the local player's shape
+                                auto shape = std::make_unique<sf::RectangleShape>(sf::Vector2f{30.f, 20.f});
+                                shape->setOrigin(shape->getSize() / 2.f);
+                                shape->setFillColor(sf::Color::Cyan);
+                                shape->setPosition({100.f, window.getSize().y / 2.f});
+                                entities[pid] = std::move(shape);
+                                entityTypes[pid] = 'P';
+                                entityHealth[pid] = 1;
+                                sf::Vector2f pos = entities[pid]->getPosition();
+                                serverPositions[pid] = pos;
+                                renderPositions[pid] = pos;
+                                gotWelcome = true;
+                            }
+                        }
+                    }
                 }
-                gotWelcome = true;
             }
             auto elapsed = std::chrono::steady_clock::now() - start;
             if (elapsed > std::chrono::seconds(2)) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        if (!gotWelcome) {
-            std::cout << "[Client] No WELCOME from server, playing offline" << std::endl;
-            localNetId = 0;
-            auto shape = std::make_unique<sf::RectangleShape>(sf::Vector2f{30.f, 20.f});
-            shape->setOrigin(shape->getSize() / 2.f);
-            shape->setFillColor(sf::Color::Cyan);
-            shape->setPosition({100.f, window.getSize().y / 2.f});
-            entities[localNetId] = std::move(shape);
-            entityTypes[localNetId] = 'P';
-            entityHealth[localNetId] = 1;
-            sf::Vector2f pos = entities[localNetId]->getPosition();
-            serverPositions[localNetId] = pos;
-            renderPositions[localNetId] = pos;
-        }
+        if (!gotWelcome)
+            return 84;
     }
 
+    // boucle lobby
+
+    if (wait_to_join(&window) == 84) {
+        g_running = false;
+        client.disconnect();
+        return 0;
+    }
     // Boucle principale
     sf::Clock clock;
     while (window.isOpen() && g_running) {
@@ -168,6 +134,7 @@ int main(int ac, char **av)
                 window.close();
                 break;
             }
+
             if (const auto* key = ev->getIf<sf::Event::KeyPressed>()) {
                 if (key->code == sf::Keyboard::Key::Escape) {
                     window.close();
@@ -212,84 +179,186 @@ int main(int ac, char **av)
                 itR->second.y = std::clamp(itR->second.y, 0.f, static_cast<float>(win.y));
             }
         }
-        // Envoyer au serveur
+        // Envoyer l'entrée au serveur via la version binaire du protocole
         if (client.isConnected()) {
-            std::string m = "INPUT " + std::to_string(dir) + " " + std::to_string(fire) + "\r\n";
-            client.sendData(m);
+            client.sendData(protocol::encodeInput(static_cast<uint8_t>(dir), fire != 0));
         }
-        // Recevoir snapshots
+        // Recevoir les paquets réseau.  Chaque datagramme correspond à un
+        // paquet binaire.  On parcourt tant qu'il y a des données.
         if (client.isConnected()) {
             std::string data;
-            do {
-                data = client.receiveData(4096);
-                if (!data.empty()) {
-                    std::stringstream whole(data);
-                    std::string line;
-                    while (std::getline(whole, line)) {
-                        if (!line.empty() && line.back() == '\r') line.pop_back();
-                        if (line.empty()) continue;
-                        if (line.rfind("STATE", 0) == 0) {
-                            std::stringstream header(line);
-                            std::string kw; unsigned msgId=0, tick=0;
-                            header >> kw >> msgId >> tick;
-                            client.sendData("ACK " + std::to_string(msgId) + "\r\n");
-                            std::unordered_set<unsigned> seen;
-                            std::streampos save = whole.tellg();
-                            std::string entLine;
-                            while (std::getline(whole, entLine)) {
-                                if (!entLine.empty() && entLine.back() == '\r') entLine.pop_back();
-                                if (entLine.empty()) break;
-                                if (entLine.rfind("STATE",0)==0) { whole.seekg(save); break; }
-                                std::stringstream ls(entLine);
-                                unsigned eid; char type; float x,y; int hp=0;
-                                ls >> eid >> type >> x >> y;
-                                if (type == 'P' || type == 'E') ls >> hp;
-                                seen.insert(eid);
-                                if (entities.find(eid) == entities.end()) {
-                                    if (type == 'P') {
-                                        auto s = std::make_unique<sf::RectangleShape>(sf::Vector2f{30.f,20.f});
-                                        s->setOrigin(s->getSize()/2.f);
-                                        s->setFillColor(eid==localNetId?sf::Color::Cyan:sf::Color::Green);
-                                        entities[eid] = std::move(s);
-                                    } else if (type == 'E') {
-                                        auto s = std::make_unique<sf::CircleShape>(20.f);
-                                        s->setOrigin(sf::Vector2f{20.f,20.f});
-                                        s->setFillColor(sf::Color::Red);
-                                        entities[eid] = std::move(s);
-                                    } else if (type == 'B') {
-                                        auto s = std::make_unique<sf::CircleShape>(5.f);
-                                        s->setOrigin(sf::Vector2f{5.f,5.f});
-                                        s->setFillColor(sf::Color::Yellow);
-                                        entities[eid] = std::move(s);
-                                    }
-                                    entityTypes[eid] = type;
-                                    entityHealth[eid] = hp;
-                                    serverPositions[eid] = {x,y};
-                                    renderPositions[eid] = {x,y};
-                                } else {
-                                    entityTypes[eid] = type;
-                                    entityHealth[eid] = hp;
-                                    serverPositions[eid] = {x,y};
-                                }
-                                save = whole.tellg();
+            while (!(data = client.receiveData(4096)).empty()) {
+                if (data.size() < sizeof(protocol::PacketHeader)) {
+                    continue;
+                }
+                protocol::PacketHeader hdr;
+                if (!protocol::decodeHeader(reinterpret_cast<const uint8_t*>(data.data()), data.size(), hdr)) {
+                    continue;
+                }
+                if (hdr.version != protocol::PROTOCOL_VERSION) {
+                    continue;
+                }
+                const uint8_t *payload = reinterpret_cast<const uint8_t*>(data.data()) + sizeof(protocol::PacketHeader);
+                size_t payloadLen = hdr.length;
+                switch (static_cast<protocol::Opcode>(hdr.opcode)) {
+                    case protocol::Opcode::STATE: {
+                        // Decode the state snapshot.  Payload structure is
+                        // described in BuildStatePacket().
+                        if (payloadLen < sizeof(uint32_t) * 2 + sizeof(uint16_t) * 3) {
+                            break;
+                        }
+                        const uint8_t *ptr = payload;
+                        uint32_t msgIdNet;
+                        std::memcpy(&msgIdNet, ptr, sizeof(uint32_t));
+                        ptr += sizeof(uint32_t);
+                        uint32_t tickNet;
+                        std::memcpy(&tickNet, ptr, sizeof(uint32_t));
+                        ptr += sizeof(uint32_t);
+                        uint32_t msgId = ntohl(msgIdNet);
+                        (void)tickNet; // tick currently unused on client
+                        uint16_t nPlayersNet, nEnemiesNet, nProjsNet;
+                        std::memcpy(&nPlayersNet, ptr, sizeof(uint16_t)); ptr += sizeof(uint16_t);
+                        std::memcpy(&nEnemiesNet, ptr, sizeof(uint16_t)); ptr += sizeof(uint16_t);
+                        std::memcpy(&nProjsNet,   ptr, sizeof(uint16_t)); ptr += sizeof(uint16_t);
+                        size_t nPlayers = ntohs(nPlayersNet);
+                        size_t nEnemies = ntohs(nEnemiesNet);
+                        size_t nProjs   = ntohs(nProjsNet);
+                        std::unordered_set<unsigned> seen;
+                        // Decode players
+                        for (size_t i = 0; i < nPlayers; ++i) {
+                            if (ptr + sizeof(uint32_t) + 1 + sizeof(uint32_t) * 3 > payload + payloadLen) {
+                                break;
                             }
-                            // Supprimer les entités absentes du snapshot (sauf locale)
-                            for (auto it = entities.begin(); it != entities.end(); ) {
-                                unsigned eid = it->first;
-                                if (seen.find(eid) == seen.end() && eid != localNetId) {
-                                    entityTypes.erase(eid);
-                                    entityHealth.erase(eid);
-                                    serverPositions.erase(eid);
-                                    renderPositions.erase(eid);
-                                    it = entities.erase(it);
-                                } else {
-                                    ++it;
-                                }
+                            uint32_t idNet;
+                            std::memcpy(&idNet, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            unsigned eid = ntohl(idNet);
+                            uint8_t typeByte = *ptr++;
+                            (void)typeByte; // should be 0
+                            uint32_t xBits, yBits, hpNet;
+                            std::memcpy(&xBits, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            std::memcpy(&yBits, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            std::memcpy(&hpNet, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            float x, y;
+                            xBits = ntohl(xBits);
+                            yBits = ntohl(yBits);
+                            std::memcpy(&x, &xBits, sizeof(float));
+                            std::memcpy(&y, &yBits, sizeof(float));
+                            int hp = static_cast<int>(ntohl(hpNet));
+                            seen.insert(eid);
+                            if (entities.find(eid) == entities.end()) {
+                                auto shape = std::make_unique<sf::RectangleShape>(sf::Vector2f{30.f,20.f});
+                                shape->setOrigin(shape->getSize()/2.f);
+                                shape->setFillColor(eid==localNetId?sf::Color::Cyan:sf::Color::Green);
+                                entities[eid] = std::move(shape);
+                            }
+                            entityTypes[eid] = 'P';
+                            entityHealth[eid] = hp;
+                            serverPositions[eid] = {x,y};
+                            if (renderPositions.find(eid) == renderPositions.end()) {
+                                renderPositions[eid] = {x,y};
                             }
                         }
+                        // Decode enemies
+                        for (size_t i = 0; i < nEnemies; ++i) {
+                            if (ptr + sizeof(uint32_t) + 1 + sizeof(uint32_t) * 3 > payload + payloadLen) {
+                                break;
+                            }
+                            uint32_t idNet;
+                            std::memcpy(&idNet, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            unsigned eid = ntohl(idNet);
+                            uint8_t typeByte = *ptr++;
+                            (void)typeByte; // should be 1
+                            uint32_t xBits, yBits, hpNet;
+                            std::memcpy(&xBits, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            std::memcpy(&yBits, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            std::memcpy(&hpNet, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            float x, y;
+                            xBits = ntohl(xBits);
+                            yBits = ntohl(yBits);
+                            std::memcpy(&x, &xBits, sizeof(float));
+                            std::memcpy(&y, &yBits, sizeof(float));
+                            int hp = static_cast<int>(ntohl(hpNet));
+                            seen.insert(eid);
+                            if (entities.find(eid) == entities.end()) {
+                                auto shape = std::make_unique<sf::CircleShape>(20.f);
+                                shape->setOrigin(sf::Vector2f{20.f,20.f});
+                                shape->setFillColor(sf::Color::Red);
+                                entities[eid] = std::move(shape);
+                            }
+                            entityTypes[eid] = 'E';
+                            entityHealth[eid] = hp;
+                            serverPositions[eid] = {x,y};
+                            if (renderPositions.find(eid) == renderPositions.end()) {
+                                renderPositions[eid] = {x,y};
+                            }
+                        }
+                        // Decode projectiles
+                        for (size_t i = 0; i < nProjs; ++i) {
+                            if (ptr + sizeof(uint32_t) + 1 + sizeof(uint32_t) * 2 > payload + payloadLen) {
+                                break;
+                            }
+                            uint32_t idNet;
+                            std::memcpy(&idNet, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            unsigned eid = ntohl(idNet);
+                            uint8_t typeByte = *ptr++;
+                            (void)typeByte; // should be 2
+                            uint32_t xBits, yBits;
+                            std::memcpy(&xBits, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            std::memcpy(&yBits, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+                            float x, y;
+                            xBits = ntohl(xBits);
+                            yBits = ntohl(yBits);
+                            std::memcpy(&x, &xBits, sizeof(float));
+                            std::memcpy(&y, &yBits, sizeof(float));
+                            seen.insert(eid);
+                            if (entities.find(eid) == entities.end()) {
+                                auto shape = std::make_unique<sf::CircleShape>(5.f);
+                                shape->setOrigin(sf::Vector2f{5.f,5.f});
+                                shape->setFillColor(sf::Color::Yellow);
+                                entities[eid] = std::move(shape);
+                            }
+                            entityTypes[eid] = 'B';
+                            entityHealth[eid] = 1; // bullets have implicit hp
+                            serverPositions[eid] = {x,y};
+                            if (renderPositions.find(eid) == renderPositions.end()) {
+                                renderPositions[eid] = {x,y};
+                            }
+                        }
+                        // Remove entities not present in snapshot (except local)
+                        for (auto it = entities.begin(); it != entities.end(); ) {
+                            unsigned eid = it->first;
+                            if (seen.find(eid) == seen.end() && eid != localNetId) {
+                                entityTypes.erase(eid);
+                                entityHealth.erase(eid);
+                                serverPositions.erase(eid);
+                                renderPositions.erase(eid);
+                                it = entities.erase(it);
+                            } else {
+                                ++it;
+                            }
+                        }
+                        // Send ACK
+                        client.sendData(protocol::encodeAck(msgId));
+                        break;
                     }
+                    case protocol::Opcode::SCOREBOARD: {
+                        // Decode and display the scoreboard, then end the game
+                        std::vector<protocol::ScoreEntry> scores;
+                        if (protocol::decodeScoreboard(payload, payloadLen, scores)) {
+                            std::cout << "\n=== Scoreboard ===\n";
+                            for (const auto &entry : scores) {
+                                std::cout << "Player " << entry.playerId << " - Score: " << entry.score
+                                          << ", Time: " << entry.timeSurvived << "s" << std::endl;
+                            }
+                            std::cout << "===================\n";
+                        }
+                        g_running = false;
+                        break;
+                    }
+                    default:
+                        break;
                 }
-            } while (!data.empty());
+            }
         }
         // Interpolation simple
         const float smoothing=10.f;

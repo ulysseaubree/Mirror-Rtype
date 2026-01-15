@@ -7,14 +7,6 @@
 
 using namespace ecs;
 
-//
-// Note: use the global coordinator provided in ecs/ecs.hpp (gCoordinator) rather than
-// creating a separate instance.  Having multiple coordinators would result in
-// systems being registered on one coordinator and entities created on another,
-// causing updates to never run.  See server/main.cpp for details.
-//
-
-// Systèmes globalement accessibles. Ils seront initialisés dans InitEcs().
 std::shared_ptr<MovementSystem> gMovementSystem;
 std::shared_ptr<InputSystem>    gInputSystem;
 std::shared_ptr<BoundarySystem> gBoundarySystem;
@@ -23,18 +15,12 @@ std::shared_ptr<LifetimeSystem> gLifetimeSystem;
 std::shared_ptr<SpawnerSystem>  gSpawnerSystem;
 std::shared_ptr<CollisionSystem> gCollisionSystem;
 
-// Global pointer to the AI system.  It is initialised in InitEcs() and
-// accessed from the game loop in server/main.cpp to drive enemy
-// behaviour.  Without registering and storing this system the AI
-// update will never run and enemies will remain static.
 std::shared_ptr<AISystem> gAISystem;
 
 void InitEcs()
 {
-    // Initialise the global coordinator. This sets up entity and component managers.
     gCoordinator.Init();
 
-    // === Register Components ===
     gCoordinator.RegisterComponent<Transform>();
     gCoordinator.RegisterComponent<Velocity>();
     gCoordinator.RegisterComponent<PlayerInput>();
@@ -48,7 +34,6 @@ void InitEcs()
     gCoordinator.RegisterComponent<Spawner>();
     gCoordinator.RegisterComponent<PlayerTag>();
 
-    // === Register Systems + signatures ===
     Signature sig;
 
     gMovementSystem = gCoordinator.RegisterSystem<MovementSystem>();
@@ -92,11 +77,6 @@ void InitEcs()
     sig.set(gCoordinator.GetComponentType<Team>());
     gCoordinator.SetSystemSignature<CollisionSystem>(sig);
 
-    // === Register AISystem ===
-    // The AI system controls behaviours for entities with an AIController
-    // component (e.g., enemies).  We include Transform and Velocity so
-    // the system can move entities, AIController for state, Health to
-    // respond to low hit points and Team to avoid attacking allies.
     gAISystem = gCoordinator.RegisterSystem<AISystem>();
     sig.reset();
     sig.set(gCoordinator.GetComponentType<Transform>());
