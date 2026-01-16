@@ -1,9 +1,13 @@
 #include "../network/includes/udpServer.hpp"
+#include "../ecs/core/coordinator.hpp"
+#include "../ecs/game/systems.hpp"
+#include "../ecs/game/components.hpp"
 #include <csignal>
 #include <atomic>
 #include <thread>
 #include <chrono>
 #include <iostream>
+#include <memory>
 
 using namespace ecs;
 
@@ -36,39 +40,39 @@ void InitEcs()
 
     Signature sig;
 
-    gMovementSystem = gCoordinator.RegisterSystem<MovementSystem>();
+    systems.movement = coordinator.RegisterSystem<MovementSystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<Transform>());
-    sig.set(gCoordinator.GetComponentType<Velocity>());
-    gCoordinator.SetSystemSignature<MovementSystem>(sig);
+    sig.set(coordinator.GetComponentType<Transform>());
+    sig.set(coordinator.GetComponentType<Velocity>());
+    coordinator.SetSystemSignature<MovementSystem>(sig);
 
-    gInputSystem = gCoordinator.RegisterSystem<InputSystem>();
+    systems.input = coordinator.RegisterSystem<InputSystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<PlayerInput>());
-    sig.set(gCoordinator.GetComponentType<Velocity>());
-    gCoordinator.SetSystemSignature<InputSystem>(sig);
+    sig.set(coordinator.GetComponentType<PlayerInput>());
+    sig.set(coordinator.GetComponentType<Velocity>());
+    coordinator.SetSystemSignature<InputSystem>(sig);
 
-    gBoundarySystem = gCoordinator.RegisterSystem<BoundarySystem>();
+    systems.boundary = coordinator.RegisterSystem<BoundarySystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<Transform>());
-    sig.set(gCoordinator.GetComponentType<Boundary>());
-    gCoordinator.SetSystemSignature<BoundarySystem>(sig);
+    sig.set(coordinator.GetComponentType<Transform>());
+    sig.set(coordinator.GetComponentType<Boundary>());
+    coordinator.SetSystemSignature<BoundarySystem>(sig);
 
-    gHealthSystem = gCoordinator.RegisterSystem<HealthSystem>();
+    systems.health = coordinator.RegisterSystem<HealthSystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<Health>());
-    gCoordinator.SetSystemSignature<HealthSystem>(sig);
+    sig.set(coordinator.GetComponentType<Health>());
+    coordinator.SetSystemSignature<HealthSystem>(sig);
 
-    gLifetimeSystem = gCoordinator.RegisterSystem<LifetimeSystem>();
+    systems.lifetime = coordinator.RegisterSystem<LifetimeSystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<Lifetime>());
-    gCoordinator.SetSystemSignature<LifetimeSystem>(sig);
+    sig.set(coordinator.GetComponentType<Lifetime>());
+    coordinator.SetSystemSignature<LifetimeSystem>(sig);
 
-    gSpawnerSystem = gCoordinator.RegisterSystem<SpawnerSystem>();
+    systems.spawner = coordinator.RegisterSystem<SpawnerSystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<Spawner>());
-    sig.set(gCoordinator.GetComponentType<Transform>());
-    gCoordinator.SetSystemSignature<SpawnerSystem>(sig);
+    sig.set(coordinator.GetComponentType<Spawner>());
+    sig.set(coordinator.GetComponentType<Transform>());
+    coordinator.SetSystemSignature<SpawnerSystem>(sig);
 
    gCollisionSystem = gCoordinator.RegisterSystem<CollisionSystem>();
     sig.reset();
@@ -79,10 +83,10 @@ void InitEcs()
 
     gAISystem = gCoordinator.RegisterSystem<AISystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<Transform>());
-    sig.set(gCoordinator.GetComponentType<Velocity>());
-    sig.set(gCoordinator.GetComponentType<AIController>());
-    sig.set(gCoordinator.GetComponentType<Health>());
-    sig.set(gCoordinator.GetComponentType<Team>());
-    gCoordinator.SetSystemSignature<AISystem>(sig);
+    sig.set(coordinator.GetComponentType<Transform>());
+    sig.set(coordinator.GetComponentType<Velocity>());
+    sig.set(coordinator.GetComponentType<AIController>());
+    sig.set(coordinator.GetComponentType<Health>());
+    sig.set(coordinator.GetComponentType<Team>());
+    coordinator.SetSystemSignature<AISystem>(sig);
 }

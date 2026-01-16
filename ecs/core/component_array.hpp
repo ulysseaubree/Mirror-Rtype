@@ -3,6 +3,7 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -35,14 +36,15 @@ public:
         std::size_t lastIndex = mSize - 1;
 
         if (removedIndex != lastIndex) {
-            Entity movedEntity = mIndexToEntity[lastIndex];
+            Entity movedEntity = mIndexToEntity[lastIndex].value();
             mComponentArray[removedIndex] = std::move(mComponentArray[lastIndex]);
             mIndexToEntity[removedIndex] = movedEntity;
             mEntityToIndex[movedEntity] = removedIndex;
         }
 
         mEntityToIndex.erase(it);
-        mIndexToEntity[lastIndex] = Entity{};
+        mComponentArray[lastIndex].reset();
+        mIndexToEntity[lastIndex].reset();
         --mSize;
     }
 
@@ -50,7 +52,8 @@ public:
     {
         auto it = mEntityToIndex.find(entity);
         assert(it != mEntityToIndex.end() && "Retrieving non-existent component");
-        return mComponentArray[it->second];
+        assert(mComponentArray[it->second].has_value() && "Component is empty");
+        return mComponentArray[it->second].value();
     }
 
     void EntityDestroyed(Entity entity)
@@ -62,11 +65,11 @@ public:
     }
 
 private:
-    std::array<T, MAX_ENTITIES> mComponentArray{};
-    std::array<Entity, MAX_ENTITIES> mIndexToEntity{};
+    // Utilisation de std::optional pour gérer les slots vides
+    std::array<std::optional<T>, MAX_ENTITIES> mComponentArray{};
+    std::array<std::optional<Entity>, MAX_ENTITIES> mIndexToEntity{};
     std::unordered_map<Entity, std::size_t> mEntityToIndex{};
     std::size_t mSize{};
 };
 
 } // namespace ecs
-

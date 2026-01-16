@@ -1,7 +1,9 @@
 #pragma once
 
+#include <any>
 #include <array>
 #include <cassert>
+#include <functional>
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
@@ -14,10 +16,7 @@ namespace ecs {
 // Handles component registrations and per-type storage.
 class ComponentManager {
 public:
-    ComponentManager()
-    {
-        mDestroyCallbacks.fill(nullptr);
-    }
+    ComponentManager() = default;
 
     template <typename T>
     void RegisterComponent()
@@ -29,8 +28,10 @@ public:
         ComponentType type = mNextComponentType++;
         auto array = std::make_shared<ComponentArray<T>>();
         mComponentTypes[typeName] = type;
-        mComponentArrays[type] = std::static_pointer_cast<void>(array);
-        mDestroyCallbacks[type] = &ComponentManager::EntityDestroyedInvoker<T>;
+        mComponentArrays[type] = array;
+        mDestroyCallbacks[type] = [array](Entity entity) {
+            array->EntityDestroyed(entity);
+        };
     }
 
     template <typename T>
@@ -63,35 +64,32 @@ public:
     void EntityDestroyed(Entity entity)
     {
         for (ComponentType type = 0; type < mNextComponentType; ++type) {
-            if (auto& storage = mComponentArrays[type]; storage && mDestroyCallbacks[type]) {
-                mDestroyCallbacks[type](storage.get(), entity);
+            if (mDestroyCallbacks[type]) {
+                mDestroyCallbacks[type](entity);
             }
         }
     }
 
 private:
     std::unordered_map<std::type_index, ComponentType> mComponentTypes{};
-    std::array<std::shared_ptr<void>, MAX_COMPONENTS> mComponentArrays{};
-    std::array<void (*)(void*, Entity), MAX_COMPONENTS> mDestroyCallbacks{};
+    std::array<std::any, MAX_COMPONENTS> mComponentArrays{};
+    std::array<std::function<void(Entity)>, MAX_COMPONENTS> mDestroyCallbacks{};
     ComponentType mNextComponentType{};
-
-    template <typename T>
-    static void EntityDestroyedInvoker(void* storage, Entity entity)
-    {
-        auto* typedArray = static_cast<ComponentArray<T>*>(storage);
-        assert(typedArray && "Component storage missing");
-        typedArray->EntityDestroyed(entity);
-    }
 
     template <typename T>
     std::shared_ptr<ComponentArray<T>> GetComponentArray()
     {
         ComponentType type = GetComponentType<T>();
-        auto array = std::static_pointer_cast<ComponentArray<T>>(mComponentArrays[type]);
-        assert(array && "Component array missing");
-        return array;
+        
+        try {
+            auto array = std::any_cast<std::shared_ptr<ComponentArray<T>>>(mComponentArrays[type]);
+            assert(array && "Component array missing");
+            return array;
+        } catch (const std::bad_any_cast&) {
+            assert(false && "Invalid component array type");
+            return nullptr;
+        }
     }
 };
 
 } // namespace ecs
-

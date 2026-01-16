@@ -1,18 +1,18 @@
 #pragma once
 
+#include <functional>
 #include <vector>
-
 #include "types.hpp"
 
 namespace ecs {
 
-// Base system: holds required signature and matching entities.
-class System {
-public:
-    virtual ~System() = default;
-    Signature signature{};
+class Coordinator;
+
+struct SystemData {
     std::vector<Entity> entities{};
 };
 
-} // namespace ecs
+using SystemUpdateFunc = std::function<void(Coordinator&, const std::vector<Entity>&, float)>;
+using SystemUpdateFuncNoTime = std::function<void(Coordinator&, const std::vector<Entity>&)>;
 
+} // namespace ecs

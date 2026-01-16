@@ -6,6 +6,7 @@
 */
 
 #include "../network/includes/udpServer.hpp"
+#include "../ecs/core/coordinator.hpp"
 #include "../ecs/game/systems.hpp"
 #include "../network/includes/protocol.hpp"
 #include "../network/includes/thread_utils.hpp"
@@ -148,6 +149,7 @@ ecs::Entity CreateEnemyEntity()
     Entity e = gCoordinator.CreateEntity();
     static std::mt19937 rng{std::random_device{}()};
     std::uniform_real_distribution<float> distY(50.f, 550.f);
+    
     Transform t{};
     t.x = 900.f;
     t.y = distY(rng);
@@ -171,61 +173,60 @@ ecs::Entity CreateEnemyEntity()
 
     Team team{};
     team.teamID = 1;
-    gCoordinator.AddComponent(e, team);
+    coordinator.AddComponent(e, team);
 
     Collider col{};
     col.shape = Collider::Shape::Circle;
     col.radius = 20.f;
-    gCoordinator.AddComponent(e, col);
+    coordinator.AddComponent(e, col);
 
     Damager dmg{};
     dmg.damage = 10;
-    gCoordinator.AddComponent(e, dmg);
+    coordinator.AddComponent(e, dmg);
 
     AIController ai{};
     ai.currentState = AIController::State::Patrolling;
-    gCoordinator.AddComponent(e, ai);
+    coordinator.AddComponent(e, ai);
 
     gEnemyShootCooldowns[e] = 2.0f;
 
     return e;
 }
 
-ecs::Entity CreatePlayerEntity()
+ecs::Entity CreatePlayerEntity(Coordinator& coordinator)
 {
-    using namespace ecs;
-    Entity e = gCoordinator.CreateEntity();
+    Entity e = coordinator.CreateEntity();
 
     Transform t{};
     t.x = 400.f;
     t.y = 300.f;
-    gCoordinator.AddComponent(e, t);
+    coordinator.AddComponent(e, t);
 
     Velocity v{};
-    gCoordinator.AddComponent(e, v);
+    coordinator.AddComponent(e, v);
 
     PlayerInput input{};
-    gCoordinator.AddComponent(e, input);
+    coordinator.AddComponent(e, input);
 
     Boundary b{};
     b.minX = 0.f;  b.maxX = 800.f;
     b.minY = 0.f;  b.maxY = 600.f;
     b.destroy = false;
     b.wrap = false;
-    gCoordinator.AddComponent(e, b);
+    coordinator.AddComponent(e, b);
 
     Health h{};
     h.current = 100;
     h.max = 100;
-    gCoordinator.AddComponent(e, h);
+    coordinator.AddComponent(e, h);
 
     Team team{};
-    team.teamID = 0; // joueurs
-    gCoordinator.AddComponent(e, team);
+    team.teamID = 0;
+    coordinator.AddComponent(e, team);
 
     PlayerTag tag{};
     tag.clientId = static_cast<int>(e);
-    gCoordinator.AddComponent(e, tag);
+    coordinator.AddComponent(e, tag);
 
     // Record creation time and initialise score.  These maps are used
     // when computing the scoreboard at the end of the game.
@@ -235,7 +236,7 @@ ecs::Entity CreatePlayerEntity()
     Collider col{};
     col.shape = Collider::Shape::Circle;
     col.radius = 18.f;
-    gCoordinator.AddComponent(e, col);
+    coordinator.AddComponent(e, col);
 
     gPlayerShootCooldowns[e] = 0.f;
 
@@ -248,44 +249,36 @@ static void SpawnProjectileFrom(ecs::Entity shooter, bool fromPlayer)
     const auto &shooterTransform = gCoordinator.GetComponent<Transform>(shooter);
     const auto &shooterTeam = gCoordinator.GetComponent<Team>(shooter);
 
-    Entity proj = gCoordinator.CreateEntity();
+    Entity proj = coordinator.CreateEntity();
 
-    // Place the projectile slightly in front of the shooter.
     Transform t{};
     t.x = shooterTransform.x + (fromPlayer ? 25.f : -25.f);
     t.y = shooterTransform.y;
-    gCoordinator.AddComponent(proj, t);
+    coordinator.AddComponent(proj, t);
 
-    // Assign velocity based on the origin of the shot.
     Velocity v{};
     v.vx = fromPlayer ? 400.f : -200.f;
     v.vy = 0.f;
-    gCoordinator.AddComponent(proj, v);
+    coordinator.AddComponent(proj, v);
 
-    // Use a small collider to detect impacts.  Bullets are not triggers
-    // so they will cause damage on collision.
     Collider c{};
     c.shape = Collider::Shape::Circle;
     c.radius = 5.f;
     c.isTrigger = false;
-    gCoordinator.AddComponent(proj, c);
+    coordinator.AddComponent(proj, c);
 
-    // Damage differs for player and enemy projectiles to balance gameplay.
     Damager d{};
     d.damage = fromPlayer ? 10 : 15;
-    gCoordinator.AddComponent(proj, d);
+    coordinator.AddComponent(proj, d);
 
-    // Propagate the team identifier from the shooter to the projectile.
     Team team{};
     team.teamID = shooterTeam.teamID;
-    gCoordinator.AddComponent(proj, team);
+    coordinator.AddComponent(proj, team);
 
-    // Limit projectile lifetime to prevent stray bullets lingering forever.
     Lifetime lifetime{};
     lifetime.timeLeft = 3.0f;
-    gCoordinator.AddComponent(proj, lifetime);
+    coordinator.AddComponent(proj, lifetime);
 
-    // Destroy the projectile when it leaves the play area.
     Boundary boundary{};
     boundary.minX = -100.f;
     boundary.maxX = 900.f;
@@ -293,9 +286,8 @@ static void SpawnProjectileFrom(ecs::Entity shooter, bool fromPlayer)
     boundary.maxY = 700.f;
     boundary.destroy = true;
     boundary.wrap = false;
-    gCoordinator.AddComponent(proj, boundary);
+    coordinator.AddComponent(proj, boundary);
 
-    // Keep track of all projectiles for synchronisation with clients.
     gProjectiles.push_back(proj);
 }
 
@@ -309,6 +301,7 @@ static void signal_handler(int)
 }
 
 std::string HandleMessageFromClient(
+    Coordinator& coordinator,
     const std::string& msg,
     const std::string& clientKey,
     int& nextMsgId,
@@ -318,22 +311,18 @@ std::string HandleMessageFromClient(
     std::string type = (pos == std::string::npos) ? msg : msg.substr(0, pos);
 
     if (type == "HELLO") {
-        // Créer un joueur si nécessaire
         if (gClientToEntity.find(clientKey) == gClientToEntity.end()) {
-            ecs::Entity e = CreatePlayerEntity();
+            ecs::Entity e = CreatePlayerEntity(coordinator);
             gClientToEntity[clientKey] = e;
-
-            // Réponse immédiate WELCOME
             return "WELCOME " + std::to_string(e) + "\r\n";
         }
-        // Si déjà connu, renvoyer quand même un WELCOME
         ecs::Entity e = gClientToEntity[clientKey];
         return "WELCOME " + std::to_string(e) + "\r\n";
     }
 
     if (type == "INPUT") {
         if (gClientToEntity.find(clientKey) == gClientToEntity.end())
-            return ""; // ignore si pas encore HELLO
+            return "";
 
         ecs::Entity e = gClientToEntity[clientKey];
 
@@ -345,12 +334,10 @@ std::string HandleMessageFromClient(
             std::stringstream ss(rest);
             ss >> direction >> fire;
         }
-        auto& input = gCoordinator.GetComponent<ecs::PlayerInput>(e);
+        auto& input = coordinator.GetComponent<ecs::PlayerInput>(e);
         input.direction = direction;
         input.firePressed = (fire != 0);
-        input.firePressed = (fire != 0);
 
-        // Pas de réponse directe
         return "";
     }
 
@@ -372,7 +359,6 @@ std::string HandleMessageFromClient(
         return "";
     }
 
-    // PING / ECHO pour debug
     if (type == "PING") {
         return "PONG\r\n";
     }
@@ -472,7 +458,7 @@ static void RunServerLoop(UdpServer& server)
             }
         }
 
-        // Remove clients that have not sent anything for a while
+        // Nettoyer les clients inactifs
         auto activeClients = server.getActiveClients(10);
         std::unordered_set<std::string> activeKeys;
         for (const auto &ci : activeClients) {
@@ -481,7 +467,7 @@ static void RunServerLoop(UdpServer& server)
         for (auto it = gClientToEntity.begin(); it != gClientToEntity.end();) {
             if (activeKeys.find(it->first) == activeKeys.end()) {
                 Entity ent = it->second;
-                gCoordinator.RequestDestroyEntity(ent);
+                coordinator.RequestDestroyEntity(ent);
                 gPlayerShootCooldowns.erase(ent);
                 gEnemyShootCooldowns.erase(ent);
                 it = gClientToEntity.erase(it);
@@ -496,36 +482,36 @@ static void RunServerLoop(UdpServer& server)
             for (auto &kv : gPlayerShootCooldowns) kv.second -= fixedDt;
             for (auto &kv : gEnemyShootCooldowns) kv.second -= fixedDt;
 
-            // Systems
-            gInputSystem->Update();
-            if (gAISystem) gAISystem->Update(fixedDt);
-            gMovementSystem->Update(fixedDt);
-            gBoundarySystem->Update();
-            gSpawnerSystem->Update(fixedDt);
-            gCollisionSystem->Update();
-            gHealthSystem->Update(fixedDt);
-            gLifetimeSystem->Update(fixedDt);
+            // IMPORTANT: Passer le coordinator à TOUS les systèmes
+            systems.input->Update(coordinator);
+            if (systems.ai) systems.ai->Update(coordinator, fixedDt);
+            systems.movement->Update(coordinator, fixedDt);
+            systems.boundary->Update(coordinator);
+            systems.spawner->Update(coordinator, fixedDt);
+            systems.collision->Update(coordinator);
+            systems.health->Update(coordinator, fixedDt);
+            systems.lifetime->Update(coordinator, fixedDt);
 
             // Player shooting
             for (const auto &kv : gClientToEntity) {
                 Entity player = kv.second;
-                Signature sig = gCoordinator.GetSignature(player);
+                Signature sig = coordinator.GetSignature(player);
                 if (!sig.any()) continue;
                 float &cd = gPlayerShootCooldowns[player];
-                auto &inp = gCoordinator.GetComponent<PlayerInput>(player);
+                auto &inp = coordinator.GetComponent<PlayerInput>(player);
                 if (inp.firePressed && cd <= 0.f) {
-                    SpawnProjectileFrom(player, true);
+                    SpawnProjectileFrom(coordinator, player, true);
                     cd = 0.3f;
                 }
             }
 
             // Enemy shooting
             for (auto enemy : gEnemies) {
-                Signature sig = gCoordinator.GetSignature(enemy);
+                Signature sig = coordinator.GetSignature(enemy);
                 if (!sig.any()) continue;
                 float &cd = gEnemyShootCooldowns[enemy];
                 if (cd <= 0.f) {
-                    SpawnProjectileFrom(enemy, false);
+                    SpawnProjectileFrom(coordinator, enemy, false);
                     cd = 2.0f;
                 }
             }
@@ -533,14 +519,14 @@ static void RunServerLoop(UdpServer& server)
             // Enemy spawning
             enemySpawnTimer += fixedDt;
             if (enemySpawnTimer >= enemySpawnInterval) {
-                Entity en = CreateEnemyEntity();
+                Entity en = CreateEnemyEntity(coordinator);
                 gEnemies.push_back(en);
                 enemySpawnTimer = 0.f;
             }
 
             gCoordinator.ProcessDestructions();
             gEnemies.erase(std::remove_if(gEnemies.begin(), gEnemies.end(), [&](Entity e){
-                bool alive = gCoordinator.GetSignature(e).any();
+                bool alive = coordinator.GetSignature(e).any();
                 if (!alive) {
                     gEnemyShootCooldowns.erase(e);
                 }
@@ -549,7 +535,7 @@ static void RunServerLoop(UdpServer& server)
             gProjectiles.erase(std::remove_if(gProjectiles.begin(), gProjectiles.end(), [&](Entity e){ return !gCoordinator.GetSignature(e).any(); }), gProjectiles.end());
             for (auto it = gClientToEntity.begin(); it != gClientToEntity.end(); ) {
                 Entity ent = it->second;
-                if (!gCoordinator.GetSignature(ent).any()) {
+                if (!coordinator.GetSignature(ent).any()) {
                     gPlayerShootCooldowns.erase(ent);
                     gEnemyShootCooldowns.erase(ent);
                     it = gClientToEntity.erase(it);
@@ -608,7 +594,12 @@ int main()
         return 84;
     }
 
-    InitEcs();
+    // Créer une instance LOCALE du coordinator (pas de global!)
+    Coordinator coordinator;
+    GameSystems systems;
+    
+    // Initialiser l'ECS
+    InitEcs(coordinator, systems);
 
     RunServerLoop(server);
 
