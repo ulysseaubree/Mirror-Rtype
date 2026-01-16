@@ -372,8 +372,7 @@ private:
         return distance < (r1 + r2);
     }
     
-    void ResolveCollision(Entity e1, Entity e2) {
-        // Vérifier que les deux entités ont le composant Team
+void ResolveCollision(Coordinator& gCoordinator, Entity e1, Entity e2) {
         Signature sig1 = gCoordinator.GetSignature(e1);
         Signature sig2 = gCoordinator.GetSignature(e2);
         

@@ -8,15 +8,13 @@
 #include "../network/includes/udpServer.hpp"
 #include "../ecs/core/coordinator.hpp"
 #include "../ecs/game/systems.hpp"
-#include "../network/includes/protocol.hpp"
-#include "../network/includes/thread_utils.hpp"
+#include "../ecs/game/components.hpp"
 #include <csignal>
 #include <atomic>
 #include <thread>
 #include <chrono>
 #include <iostream>
 #include <sstream>
-#include <cstring>
 #include <unordered_map>
 #include <vector>
 #include <random>
@@ -25,139 +23,50 @@
 
 using namespace ecs;
 
-extern std::shared_ptr<MovementSystem> gMovementSystem;
-extern std::shared_ptr<InputSystem>    gInputSystem;
-extern std::shared_ptr<BoundarySystem> gBoundarySystem;
-extern std::shared_ptr<SpawnerSystem>  gSpawnerSystem;
-extern std::shared_ptr<CollisionSystem> gCollisionSystem;
-extern std::shared_ptr<HealthSystem>   gHealthSystem;
-extern std::shared_ptr<LifetimeSystem> gLifetimeSystem;
+// Structure pour regrouper tous les systèmes (définie dans game_server.cpp)
+struct GameSystems {
+    std::shared_ptr<MovementSystem> movement;
+    std::shared_ptr<InputSystem> input;
+    std::shared_ptr<BoundarySystem> boundary;
+    std::shared_ptr<HealthSystem> health;
+    std::shared_ptr<LifetimeSystem> lifetime;
+    std::shared_ptr<SpawnerSystem> spawner;
+    std::shared_ptr<CollisionSystem> collision;
+    std::shared_ptr<AISystem> ai;
+};
 
-extern std::shared_ptr<AISystem> gAISystem;
+// Fonction définie dans game_server.cpp
+void InitEcs(Coordinator& coordinator, GameSystems& systems);
 
+// Mapping client -> entity
 std::unordered_map<std::string, ecs::Entity> gClientToEntity;
 
-static std::unordered_map<ecs::Entity, std::chrono::steady_clock::time_point> gPlayerStartTimes;
-static std::unordered_map<ecs::Entity, int> gPlayerScores;
-
+// Listes d'entités
 static std::vector<ecs::Entity> gEnemies;
-
 static std::vector<ecs::Entity> gProjectiles;
 
-// Build a binary STATE packet representing the current world snapshot.  The
-// payload layout is as follows:
-//   uint32_t msgId         // unique message identifier for reliability
-//   uint32_t tick          // simulation tick count
-//   uint16_t numPlayers    // number of player entities
-//   uint16_t numEnemies    // number of enemy entities
-//   uint16_t numProjectiles// number of projectile entities
-//   for each player:
-//       uint32_t id
-//       uint8_t  type=0    // 0 for player
-//       float    x, y
-//       uint32_t hp
-//   for each enemy:
-//       uint32_t id
-//       uint8_t  type=1    // 1 for enemy
-//       float    x, y
-//       uint32_t hp
-//   for each projectile:
-//       uint32_t id
-//       uint8_t  type=2    // 2 for projectile
-//       float    x, y
-// All numeric values are encoded in network byte order.  This function
-// assembles the payload and prefixes it with a protocol header.
-static std::string BuildStatePacket(uint32_t msgId, uint64_t tick)
-{
-    using protocol::encodeHeader;
-    using protocol::Opcode;
-    std::vector<uint8_t> payload;
-    // Reserve an initial guess to reduce reallocations
-    payload.reserve(32 + (gClientToEntity.size() + gEnemies.size() + gProjectiles.size()) * 24);
-    // Append msgId and tick (both 32 bits for simplicity)
-    uint32_t msgIdNet = htonl(msgId);
-    uint32_t tickLow = htonl(static_cast<uint32_t>(tick & 0xFFFFFFFFu));
-    payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&msgIdNet), reinterpret_cast<uint8_t *>(&msgIdNet) + sizeof(uint32_t));
-    payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&tickLow), reinterpret_cast<uint8_t *>(&tickLow) + sizeof(uint32_t));
-    // Append counts
-    uint16_t nPlayers = htons(static_cast<uint16_t>(gClientToEntity.size()));
-    uint16_t nEnemies = htons(static_cast<uint16_t>(gEnemies.size()));
-    uint16_t nProjs   = htons(static_cast<uint16_t>(gProjectiles.size()));
-    payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&nPlayers), reinterpret_cast<uint8_t *>(&nPlayers) + sizeof(uint16_t));
-    payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&nEnemies), reinterpret_cast<uint8_t *>(&nEnemies) + sizeof(uint16_t));
-    payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&nProjs),   reinterpret_cast<uint8_t *>(&nProjs)   + sizeof(uint16_t));
-    // Players
-    for (const auto &kv : gClientToEntity) {
-        ecs::Entity id = kv.second;
-        if (!gCoordinator.GetSignature(id).any()) continue;
-        uint32_t idNet = htonl(static_cast<uint32_t>(id));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&idNet), reinterpret_cast<uint8_t *>(&idNet) + sizeof(uint32_t));
-        uint8_t type = 0;
-        payload.push_back(type);
-        const auto &t = gCoordinator.GetComponent<ecs::Transform>(id);
-        uint32_t xBits; std::memcpy(&xBits, &t.x, sizeof(float)); xBits = htonl(xBits);
-        uint32_t yBits; std::memcpy(&yBits, &t.y, sizeof(float)); yBits = htonl(yBits);
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&xBits), reinterpret_cast<uint8_t *>(&xBits) + sizeof(uint32_t));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&yBits), reinterpret_cast<uint8_t *>(&yBits) + sizeof(uint32_t));
-        const auto &h = gCoordinator.GetComponent<ecs::Health>(id);
-        uint32_t hpNet = htonl(static_cast<uint32_t>(h.current));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&hpNet), reinterpret_cast<uint8_t *>(&hpNet) + sizeof(uint32_t));
-    }
-    // Enemies
-    for (auto id : gEnemies) {
-        if (!gCoordinator.GetSignature(id).any()) continue;
-        uint32_t idNet = htonl(static_cast<uint32_t>(id));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&idNet), reinterpret_cast<uint8_t *>(&idNet) + sizeof(uint32_t));
-        uint8_t type = 1;
-        payload.push_back(type);
-        const auto &t = gCoordinator.GetComponent<ecs::Transform>(id);
-        uint32_t xBits; std::memcpy(&xBits, &t.x, sizeof(float)); xBits = htonl(xBits);
-        uint32_t yBits; std::memcpy(&yBits, &t.y, sizeof(float)); yBits = htonl(yBits);
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&xBits), reinterpret_cast<uint8_t *>(&xBits) + sizeof(uint32_t));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&yBits), reinterpret_cast<uint8_t *>(&yBits) + sizeof(uint32_t));
-        const auto &h = gCoordinator.GetComponent<ecs::Health>(id);
-        uint32_t hpNet = htonl(static_cast<uint32_t>(h.current));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&hpNet), reinterpret_cast<uint8_t *>(&hpNet) + sizeof(uint32_t));
-    }
-    // Projectiles
-    for (auto id : gProjectiles) {
-        if (!gCoordinator.GetSignature(id).any()) continue;
-        uint32_t idNet = htonl(static_cast<uint32_t>(id));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&idNet), reinterpret_cast<uint8_t *>(&idNet) + sizeof(uint32_t));
-        uint8_t type = 2;
-        payload.push_back(type);
-        const auto &t = gCoordinator.GetComponent<ecs::Transform>(id);
-        uint32_t xBits; std::memcpy(&xBits, &t.x, sizeof(float)); xBits = htonl(xBits);
-        uint32_t yBits; std::memcpy(&yBits, &t.y, sizeof(float)); yBits = htonl(yBits);
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&xBits), reinterpret_cast<uint8_t *>(&xBits) + sizeof(uint32_t));
-        payload.insert(payload.end(), reinterpret_cast<uint8_t *>(&yBits), reinterpret_cast<uint8_t *>(&yBits) + sizeof(uint32_t));
-    }
-    // Build final packet
-    auto header = protocol::encodeHeader(Opcode::STATE, static_cast<uint16_t>(payload.size()));
-    std::string packet(reinterpret_cast<const char *>(header.data()), header.size());
-    packet.append(reinterpret_cast<const char *>(payload.data()), payload.size());
-    return packet;
-}
-
+// Cooldowns de tir
 static std::unordered_map<ecs::Entity, float> gPlayerShootCooldowns;
-
 static std::unordered_map<ecs::Entity, float> gEnemyShootCooldowns;
 
-ecs::Entity CreateEnemyEntity()
+// Créer un ennemi
+ecs::Entity CreateEnemyEntity(Coordinator& coordinator)
 {
-    using namespace ecs;
-    Entity e = gCoordinator.CreateEntity();
+    Entity e = coordinator.CreateEntity();
+    
     static std::mt19937 rng{std::random_device{}()};
     std::uniform_real_distribution<float> distY(50.f, 550.f);
     
     Transform t{};
     t.x = 900.f;
     t.y = distY(rng);
-    gCoordinator.AddComponent(e, t);
+    coordinator.AddComponent(e, t);
+    
     Velocity v{};
     v.vx = -80.f;
     v.vy = 0.f;
-    gCoordinator.AddComponent(e, v);
+    coordinator.AddComponent(e, v);
+    
     Boundary b{};
     b.minX = -100.f;
     b.maxX = 900.f;
@@ -165,12 +74,13 @@ ecs::Entity CreateEnemyEntity()
     b.maxY = 600.f;
     b.destroy = true;
     b.wrap = false;
-    gCoordinator.AddComponent(e, b);
+    coordinator.AddComponent(e, b);
+    
     Health h{};
     h.current = 1;
     h.max = 1;
-    gCoordinator.AddComponent(e, h);
-
+    coordinator.AddComponent(e, h);
+    
     Team team{};
     team.teamID = 1;
     coordinator.AddComponent(e, team);
@@ -228,11 +138,6 @@ ecs::Entity CreatePlayerEntity(Coordinator& coordinator)
     tag.clientId = static_cast<int>(e);
     coordinator.AddComponent(e, tag);
 
-    // Record creation time and initialise score.  These maps are used
-    // when computing the scoreboard at the end of the game.
-    gPlayerStartTimes[e] = std::chrono::steady_clock::now();
-    gPlayerScores[e] = 0;
-
     Collider col{};
     col.shape = Collider::Shape::Circle;
     col.radius = 18.f;
@@ -243,11 +148,11 @@ ecs::Entity CreatePlayerEntity(Coordinator& coordinator)
     return e;
 }
 
-static void SpawnProjectileFrom(ecs::Entity shooter, bool fromPlayer)
+// Spawn un projectile
+static void SpawnProjectileFrom(Coordinator& coordinator, ecs::Entity shooter, bool fromPlayer)
 {
-    using namespace ecs;
-    const auto &shooterTransform = gCoordinator.GetComponent<Transform>(shooter);
-    const auto &shooterTeam = gCoordinator.GetComponent<Team>(shooter);
+    const auto &shooterTransform = coordinator.GetComponent<Transform>(shooter);
+    const auto &shooterTeam = coordinator.GetComponent<Team>(shooter);
 
     Entity proj = coordinator.CreateEntity();
 
@@ -291,7 +196,8 @@ static void SpawnProjectileFrom(ecs::Entity shooter, bool fromPlayer)
     gProjectiles.push_back(proj);
 }
 
-static void RunServerLoop(UdpServer& server);
+// Forward declaration de la boucle serveur
+static void RunServerLoop(UdpServer& server, Coordinator& coordinator, GameSystems& systems);
 
 static std::atomic_bool g_running{true};
 
@@ -354,7 +260,7 @@ std::string HandleMessageFromClient(
                     }),
                 pendingMessages.end()
             );
-            // std::cout << "[Server] ACK received for message ID " << ackId << std::endl;
+            std::cout << "[Server] ACK received for message ID " << ackId << std::endl;
         }
         return "";
     }
@@ -366,14 +272,14 @@ std::string HandleMessageFromClient(
     return "ECHO: " + msg + "\r\n";
 }
 
-static void RunServerLoop(UdpServer& server)
+// Boucle serveur principale
+static void RunServerLoop(UdpServer& server, Coordinator& coordinator, GameSystems& systems)
 {
-    using namespace ecs;
     std::vector<std::pair<int, std::string>> pendingMessages;
     int nextMsgId = 0;
     uint64_t tick = 0;
     float enemySpawnTimer = 0.f;
-    const float enemySpawnInterval = 4.f;
+    const float enemySpawnInterval = 2.f;
     auto lastTime = std::chrono::high_resolution_clock::now();
     const float fixedDt = 1.f / 60.f;
     float accumulator = 0.f;
@@ -384,77 +290,26 @@ static void RunServerLoop(UdpServer& server)
         lastTime = now;
         accumulator += delta.count();
 
+        // Recevoir les messages
         std::string raw;
-        while (!(raw = server.receiveData(2048)).empty()) {
+        while (!(raw = server.receiveData(1024)).empty()) {
             const ClientInfo *client = server.getLastClient();
             if (!client) {
                 continue;
             }
-            if (raw.size() < sizeof(protocol::PacketHeader)) {
-                continue;
-            }
-            protocol::PacketHeader hdr;
-            if (!protocol::decodeHeader(reinterpret_cast<const uint8_t*>(raw.data()), raw.size(), hdr)) {
-                continue;
-            }
-            if (hdr.version != protocol::PROTOCOL_VERSION) {
-                continue;
-            }
-            if (hdr.length + sizeof(protocol::PacketHeader) > raw.size()) {
-                continue;
-            }
-            const uint8_t *payload = reinterpret_cast<const uint8_t*>(raw.data()) + sizeof(protocol::PacketHeader);
-            size_t payloadLen = hdr.length;
-            switch (static_cast<protocol::Opcode>(hdr.opcode)) {
-                case protocol::Opcode::HELLO: {
-                    // Assign or retrieve existing player entity and respond with WELCOME
-                    std::string clientKey = client->getKey();
-                    if (gClientToEntity.find(clientKey) == gClientToEntity.end()) {
-                        ecs::Entity e = CreatePlayerEntity();
-                        gClientToEntity[clientKey] = e;
-                    }
-                    ecs::Entity e = gClientToEntity[clientKey];
-                    std::string welcome = protocol::encodeWelcome(static_cast<uint32_t>(e));
-                    server.sendData(welcome, *client);
-                    break;
+            std::string clientKey = client->getKey();
+            std::stringstream ss(raw);
+            std::string line;
+            while (std::getline(ss, line)) {
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
                 }
-                case protocol::Opcode::INPUT: {
-                    uint8_t dir = 5;
-                    bool fire = false;
-                    if (protocol::decodeInput(payload, payloadLen, dir, fire)) {
-                        std::string clientKey = client->getKey();
-                        auto it = gClientToEntity.find(clientKey);
-                        if (it != gClientToEntity.end()) {
-                            ecs::Entity ent = it->second;
-                            auto &input = gCoordinator.GetComponent<ecs::PlayerInput>(ent);
-                            input.direction = dir;
-                            input.firePressed = fire;
-                        }
-                    }
-                    break;
+                if (line.empty()) continue;
+                std::string response = HandleMessageFromClient(coordinator, line, clientKey,
+                                                             nextMsgId, pendingMessages);
+                if (!response.empty()) {
+                    server.sendData(response, *client);
                 }
-                case protocol::Opcode::ACK: {
-                    uint32_t ackId;
-                    if (protocol::decodeAck(payload, payloadLen, ackId)) {
-                        pendingMessages.erase(
-                            std::remove_if(pendingMessages.begin(), pendingMessages.end(),
-                                           [ackId](const std::pair<int, std::string> &p) {
-                                               return static_cast<uint32_t>(p.first) == ackId;
-                                           }),
-                            pendingMessages.end());
-                    }
-                    break;
-                }
-                case protocol::Opcode::LIST_LOBBIES:
-                case protocol::Opcode::CREATE_LOBBY:
-                case protocol::Opcode::JOIN_LOBBY:
-                case protocol::Opcode::START_GAME:
-                case protocol::Opcode::LOBBY_UPDATE:
-                    // Lobby handling is not yet implemented in the server
-                    break;
-                default:
-                    // Unknown or unsupported opcode
-                    break;
             }
         }
 
@@ -524,7 +379,10 @@ static void RunServerLoop(UdpServer& server)
                 enemySpawnTimer = 0.f;
             }
 
-            gCoordinator.ProcessDestructions();
+            // Process destructions
+            coordinator.ProcessDestructions();
+            
+            // Nettoyer les listes
             gEnemies.erase(std::remove_if(gEnemies.begin(), gEnemies.end(), [&](Entity e){
                 bool alive = coordinator.GetSignature(e).any();
                 if (!alive) {
@@ -532,7 +390,11 @@ static void RunServerLoop(UdpServer& server)
                 }
                 return !alive;
             }), gEnemies.end());
-            gProjectiles.erase(std::remove_if(gProjectiles.begin(), gProjectiles.end(), [&](Entity e){ return !gCoordinator.GetSignature(e).any(); }), gProjectiles.end());
+            
+            gProjectiles.erase(std::remove_if(gProjectiles.begin(), gProjectiles.end(), [&](Entity e){ 
+                return !coordinator.GetSignature(e).any(); 
+            }), gProjectiles.end());
+            
             for (auto it = gClientToEntity.begin(); it != gClientToEntity.end(); ) {
                 Entity ent = it->second;
                 if (!coordinator.GetSignature(ent).any()) {
@@ -548,39 +410,45 @@ static void RunServerLoop(UdpServer& server)
             accumulator -= fixedDt;
         }
 
+        // Broadcast snapshot
         for (const auto &ci : activeClients) {
-            uint32_t msgId = static_cast<uint32_t>(++nextMsgId);
-            std::string packet = BuildStatePacket(msgId, tick);
-            server.sendData(packet, ci);
-            pendingMessages.emplace_back(static_cast<int>(msgId), std::string{});
+            std::ostringstream oss;
+            int msgId = ++nextMsgId;
+            oss << "STATE " << msgId << " " << tick << "\n";
+            
+            // Players
+            for (const auto &kv : gClientToEntity) {
+                Entity id = kv.second;
+                Signature sig = coordinator.GetSignature(id);
+                if (!sig.any()) continue;
+                const auto &t = coordinator.GetComponent<Transform>(id);
+                const auto &h = coordinator.GetComponent<Health>(id);
+                oss << id << " P " << t.x << " " << t.y << " " << h.current << "\n";
+            }
+            
+            // Enemies
+            for (auto id : gEnemies) {
+                Signature sig = coordinator.GetSignature(id);
+                if (!sig.any()) continue;
+                const auto &t = coordinator.GetComponent<Transform>(id);
+                const auto &h = coordinator.GetComponent<Health>(id);
+                oss << id << " E " << t.x << " " << t.y << " " << h.current << "\n";
+            }
+            
+            // Projectiles
+            for (auto id : gProjectiles) {
+                Signature sig = coordinator.GetSignature(id);
+                if (!sig.any()) continue;
+                const auto &t = coordinator.GetComponent<Transform>(id);
+                oss << id << " B " << t.x << " " << t.y << "\n";
+            }
+            
+            std::string payload = oss.str();
+            payload += "\r\n";
+            server.sendData(payload, ci);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-
-    std::vector<ClientInfo> remaining = server.getActiveClients(10);
-    if (!remaining.empty()) {
-        std::vector<protocol::ScoreEntry> entries;
-        auto nowScore = std::chrono::steady_clock::now();
-        for (const auto &kv : gClientToEntity) {
-            ecs::Entity ent = kv.second;
-            auto itStart = gPlayerStartTimes.find(ent);
-            float timeSurv = 0.f;
-            if (itStart != gPlayerStartTimes.end()) {
-                auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(nowScore - itStart->second).count();
-                timeSurv = static_cast<float>(dur) / 1000.f;
-            }
-            uint32_t score = 0;
-            auto itScore = gPlayerScores.find(ent);
-            if (itScore != gPlayerScores.end()) {
-                score = static_cast<uint32_t>(itScore->second);
-            }
-            entries.push_back({ static_cast<uint32_t>(ent), score, timeSurv });
-        }
-        std::string scoreboardPacket = protocol::encodeScoreboard(entries);
-        for (const auto &ci : remaining) {
-            server.sendData(scoreboardPacket, ci);
-        }
     }
 }
 
@@ -601,8 +469,13 @@ int main()
     // Initialiser l'ECS
     InitEcs(coordinator, systems);
 
-    RunServerLoop(server);
+    std::cout << "[Server] Ready on port " << server.getPort()
+              << " (press Ctrl+C to quit)" << std::endl;
 
+    // Lancer la boucle serveur en passant le coordinator
+    RunServerLoop(server, coordinator, systems);
+
+    std::cout << "\n[Server] Shutting down..." << std::endl;
     server.disconnect();
     return 0;
 }

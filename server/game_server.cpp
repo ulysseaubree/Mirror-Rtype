@@ -11,32 +11,33 @@
 
 using namespace ecs;
 
-std::shared_ptr<MovementSystem> gMovementSystem;
-std::shared_ptr<InputSystem>    gInputSystem;
-std::shared_ptr<BoundarySystem> gBoundarySystem;
-std::shared_ptr<HealthSystem>   gHealthSystem;
-std::shared_ptr<LifetimeSystem> gLifetimeSystem;
-std::shared_ptr<SpawnerSystem>  gSpawnerSystem;
-std::shared_ptr<CollisionSystem> gCollisionSystem;
+struct GameSystems {
+    std::shared_ptr<MovementSystem> movement;
+    std::shared_ptr<InputSystem> input;
+    std::shared_ptr<BoundarySystem> boundary;
+    std::shared_ptr<HealthSystem> health;
+    std::shared_ptr<LifetimeSystem> lifetime;
+    std::shared_ptr<SpawnerSystem> spawner;
+    std::shared_ptr<CollisionSystem> collision;
+    std::shared_ptr<AISystem> ai;
+};
 
-std::shared_ptr<AISystem> gAISystem;
-
-void InitEcs()
+void InitEcs(Coordinator& coordinator, GameSystems& systems)
 {
-    gCoordinator.Init();
+    coordinator.Init();
 
-    gCoordinator.RegisterComponent<Transform>();
-    gCoordinator.RegisterComponent<Velocity>();
-    gCoordinator.RegisterComponent<PlayerInput>();
-    gCoordinator.RegisterComponent<Boundary>();
-    gCoordinator.RegisterComponent<Health>();
-    gCoordinator.RegisterComponent<Team>();
-    gCoordinator.RegisterComponent<Damager>();
-    gCoordinator.RegisterComponent<AIController>();
-    gCoordinator.RegisterComponent<Lifetime>();
-    gCoordinator.RegisterComponent<Collider>();
-    gCoordinator.RegisterComponent<Spawner>();
-    gCoordinator.RegisterComponent<PlayerTag>();
+    coordinator.RegisterComponent<Transform>();
+    coordinator.RegisterComponent<Velocity>();
+    coordinator.RegisterComponent<PlayerInput>();
+    coordinator.RegisterComponent<Boundary>();
+    coordinator.RegisterComponent<Health>();
+    coordinator.RegisterComponent<Team>();
+    coordinator.RegisterComponent<Damager>();
+    coordinator.RegisterComponent<AIController>();
+    coordinator.RegisterComponent<Lifetime>();
+    coordinator.RegisterComponent<Collider>();
+    coordinator.RegisterComponent<Spawner>();
+    coordinator.RegisterComponent<PlayerTag>();
 
     Signature sig;
 
@@ -74,14 +75,16 @@ void InitEcs()
     sig.set(coordinator.GetComponentType<Transform>());
     coordinator.SetSystemSignature<SpawnerSystem>(sig);
 
-   gCollisionSystem = gCoordinator.RegisterSystem<CollisionSystem>();
+    systems.collision = coordinator.RegisterSystem<CollisionSystem>();
     sig.reset();
-    sig.set(gCoordinator.GetComponentType<Transform>());
-    sig.set(gCoordinator.GetComponentType<Collider>());
-    sig.set(gCoordinator.GetComponentType<Team>());
-    gCoordinator.SetSystemSignature<CollisionSystem>(sig);
+    sig.set(coordinator.GetComponentType<Transform>());
+    sig.set(coordinator.GetComponentType<Collider>());
+    sig.set(coordinator.GetComponentType<Team>());
+    sig.set(coordinator.GetComponentType<Damager>());
+    sig.set(coordinator.GetComponentType<Health>());
+    coordinator.SetSystemSignature<CollisionSystem>(sig);
 
-    gAISystem = gCoordinator.RegisterSystem<AISystem>();
+    systems.ai = coordinator.RegisterSystem<AISystem>();
     sig.reset();
     sig.set(coordinator.GetComponentType<Transform>());
     sig.set(coordinator.GetComponentType<Velocity>());
