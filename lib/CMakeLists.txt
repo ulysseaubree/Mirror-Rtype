@@ -40,3 +40,7 @@ endif()
 add_library(rtype_engine INTERFACE)
 target_link_libraries(rtype_engine INTERFACE rtype_network rtype_ecs)
 add_library(rtype::engine ALIAS rtype_engine)
+
+if(WIN32)
+    target_link_libraries(rtypesdk PUBLIC ws2_32)
+endif()

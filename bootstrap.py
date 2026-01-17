@@ -4,38 +4,69 @@ import subprocess
 import sys
 import platform
 import shutil
+import stat
 
-def run_command(command, check=True, cwd=None):
-    """Exécute une commande de manière sécurisée."""
+def run_command(command, cwd=None, shell=False):
+    """Exécute une commande de manière sécurisée et affiche la sortie."""
+    # Conversion en string pour l'affichage uniquement
     cmd_str = ' '.join(command) if isinstance(command, list) else command
     print(f"\033[94m>> Executing: {cmd_str}\033[0m")
+    
     try:
-        subprocess.run(command, check=check, shell=(platform.system() == "Windows" and isinstance(command, str)), cwd=cwd)
+        # Sur Windows, pour exécuter des .bat ou commandes système, shell=True est souvent requis
+        # si la commande est une liste, on laisse subprocess gérer les arguments sauf cas spécifiques
+        use_shell = shell or (platform.system() == "Windows" and isinstance(command, str))
+        
+        subprocess.run(command, check=True, cwd=cwd, shell=use_shell)
     except subprocess.CalledProcessError as e:
-        print(f"\033[91m[ERROR] Command failed: {e}\033[0m")
+        print(f"\033[91m[ERROR] Command failed with return code {e.returncode}\033[0m")
         sys.exit(1)
+
+def make_executable(path):
+    """Rend un fichier exécutable (équivalent chmod +x) sur Unix."""
+    if platform.system() != "Windows" and os.path.exists(path):
+        st = os.stat(path)
+        os.chmod(path, st.st_mode | stat.S_IEXEC)
 
 def main():
     print("\033[92m=== R-Type Engine Bootstrap ===\033[0m")
+    
+    # Détection de l'OS
+    is_windows = platform.system() == "Windows"
     root_dir = os.getcwd()
     vcpkg_dir = os.path.join(root_dir, "vcpkg")
     build_dir = os.path.join(root_dir, "build")
 
+    # ---------------------------------------------------------
     # 1. Gestion du Submodule Vcpkg
+    # ---------------------------------------------------------
     if not os.path.exists(os.path.join(vcpkg_dir, "README.md")):
-        print("initializing vcpkg submodule...")
+        print("Initializing vcpkg submodule...")
         run_command(["git", "submodule", "update", "--init", "--recursive"])
 
+    # ---------------------------------------------------------
     # 2. Bootstrap Vcpkg Executable
-    vcpkg_exe = "vcpkg.exe" if platform.system() == "Windows" else "vcpkg"
-    if not os.path.exists(os.path.join(vcpkg_dir, vcpkg_exe)):
-        script = "bootstrap-vcpkg.bat" if platform.system() == "Windows" else "./bootstrap-vcpkg.sh"
-        print(f"Bootstrapping vcpkg with {script}...")
-        run_command([os.path.join(vcpkg_dir, script)] if platform.system() != "Windows" else os.path.join(vcpkg_dir, script), cwd=vcpkg_dir)
+    # ---------------------------------------------------------
+    vcpkg_exe_name = "vcpkg.exe" if is_windows else "vcpkg"
+    vcpkg_exe_path = os.path.join(vcpkg_dir, vcpkg_exe_name)
 
-    # 3. Nettoyage du cache (Crucial après changement de structure CMake)
+    if not os.path.exists(vcpkg_exe_path):
+        print("Bootstrapping vcpkg...")
+        if is_windows:
+            script_path = os.path.join(vcpkg_dir, "bootstrap-vcpkg.bat")
+            # Windows requiert souvent shell=True pour les .bat
+            run_command([script_path], cwd=vcpkg_dir, shell=True)
+        else:
+            script_path = os.path.join(vcpkg_dir, "bootstrap-vcpkg.sh")
+            make_executable(script_path)
+            run_command([script_path], cwd=vcpkg_dir)
+
+    # ---------------------------------------------------------
+    # 3. Nettoyage du cache
+    # ---------------------------------------------------------
+    # On nettoie si on détecte un changement majeur ou pour forcer une config propre
     if os.path.exists(os.path.join(build_dir, "CMakeCache.txt")):
-        print("Refactoring detected: Cleaning CMake cache...")
+        print("Cleaning previous CMake cache...")
         try:
             shutil.rmtree(build_dir)
         except Exception as e:
@@ -43,30 +74,48 @@ def main():
 
     os.makedirs(build_dir, exist_ok=True)
 
+    # ---------------------------------------------------------
     # 4. Configuration CMake
+    # ---------------------------------------------------------
     print("Configuring CMake...")
     
-    # Détection Ninja
-    has_ninja = shutil.which("ninja") is not None
-    preset_name = "default" # Défini dans CMakePresets.json
+    # Chemin vers le toolchain file de vcpkg
+    vcpkg_toolchain = os.path.join(vcpkg_dir, "scripts/buildsystems/vcpkg.cmake")
     
-    cmd_cmake = ["cmake", "--preset", preset_name]
+    # Stratégie : On essaie une config standard solide au lieu de dépendre aveuglément des presets
+    # qui peuvent échouer si Ninja n'est pas installé sur Windows.
     
-    # Fallback si Ninja n'est pas là et que le preset le force (optionnel, dépend de ton json)
-    if not has_ninja and platform.system() != "Windows":
-        print("\033[93mNinja not found, attempting standard configuration...\033[0m")
-        # Override manuel si le preset échoue
-        cmd_cmake = ["cmake", "-S", ".", "-B", "build", "-DCMAKE_BUILD_TYPE=Debug", f"-DCMAKE_TOOLCHAIN_FILE={vcpkg_dir}/scripts/buildsystems/vcpkg.cmake"]
+    cmake_config_cmd = [
+        "cmake",
+        "-S", ".",
+        "-B", "build",
+        f"-DCMAKE_TOOLCHAIN_FILE={vcpkg_toolchain}"
+    ]
 
-    run_command(cmd_cmake)
+    # Ajout du Build Type (utile pour Ninja/Makefiles, ignoré par Visual Studio)
+    cmake_config_cmd.append("-DCMAKE_BUILD_TYPE=Debug")
 
+    run_command(cmake_config_cmd)
+
+    # ---------------------------------------------------------
     # 5. Compilation
+    # ---------------------------------------------------------
     print("Building targets...")
-    run_command(["cmake", "--build", "build"])
+    
+    # La commande --config Debug est CRUCIALE pour Visual Studio (Windows)
+    # Pour Makefiles/Ninja, elle est ignorée si CMAKE_BUILD_TYPE est déjà set, donc c'est safe.
+    build_cmd = ["cmake", "--build", "build", "--config", "Debug"]
+    
+    # Optionnel : Paralléliser le build
+    build_cmd.extend(["--parallel", str(os.cpu_count())])
+
+    run_command(build_cmd)
 
     print("\n\033[92m=== SUCCESS ===\033[0m")
-    print("Core library compiled in 'build/lib'")
-    print("Executables will appear in 'build/bin' once 'client/' or 'server/' sources are created.")
+    if is_windows:
+        print("Binaries are likely in 'build/Debug/' or 'build/bin/'")
+    else:
+        print("Binaries are in 'build/' or 'build/bin/'")
 
 if __name__ == "__main__":
     main()

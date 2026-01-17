@@ -1,86 +1,69 @@
 #pragma once
 
+#include "export.hpp"
+#include "compat.hpp"   
 #include <string>
-#include <vector>
-#include <unordered_map>
 #include <mutex>
 #include <memory>
+#include <vector>
+#include <unordered_map>
 #include <functional>
 #include <chrono>
-#include <sys/socket.h>
-#include <netinet/in.h>
-// Inclure les systèmes ECS pour fournir les pointeurs gMovementSystem, etc.
-#include "../../ecs/game/systems.hpp"
 
 class ThQueue;
 
-struct ClientInfo {
-    sockaddr_in address;
-    std::string ip;
-    int port;
-    std::chrono::steady_clock::time_point lastSeen;
-    
-    ClientInfo() = default; 
-    ClientInfo(const sockaddr_in& addr);
-    std::string getKey() const;
-};
+namespace rtype::net {
 
-class UdpServer {
-public:
-    using MessageHandler = std::function<void(const std::string&, const ClientInfo&)>;
-    
-    UdpServer(int port, bool debug = false);
-    ~UdpServer();
-    
-    // Disable copy
-    UdpServer(const UdpServer&) = delete;
-    UdpServer& operator=(const UdpServer&) = delete;
-    
-    bool initSocket();
-    bool sendData(const std::string& data, const ClientInfo& client);
-    bool broadcast(const std::string& data);
-    std::string receiveData(int bufferSize = 1024);
-    void disconnect();
-    
-    // Queue management
-    void setSend(const std::string& data, const std::string& clientKey);
-    void setReceive(const std::string& data);
-    ThQueue* getSend();
-    ThQueue* getReceive();
-    
-    // Client management
-    void updateClient(const ClientInfo& client);
-    void removeClient(const std::string& clientKey);
-    std::vector<ClientInfo> getActiveClients(int timeoutSeconds = 30);
-    size_t getClientCount() const;
-    
-    // Configuration
-    bool getDebug() const;
-    void setDebug(bool debug);
-    int getPort() const;
-    
-    // Last received client info
-    const ClientInfo* getLastClient() const { return _lastClient.get(); }
-    
-private:
-    int _port;
-    int _socket;
-    bool _initialized;
-    bool _debug;
-    
-    sockaddr_in _serverAddr;
-    mutable std::mutex _socketMutex;
-    mutable std::mutex _clientMutex;
-    
-    ThQueue* _send;
-    ThQueue* _recive;
-    
-    // Track connected clients
-    bool setSocketOptions();
-    std::unordered_map<std::string, ClientInfo> _clients;
-    std::unique_ptr<ClientInfo> _lastClient;
-    
+    struct ClientInfo {
+        sockaddr_in address;
+        std::string ip;
+        int port;
+        std::chrono::steady_clock::time_point lastSeen;
+        
+        ClientInfo() = default; 
+        ClientInfo(const sockaddr_in& addr);
+        std::string getKey() const;
+    };
 
-};
+    class RTYPE_API UdpServer {
+    public:
+        UdpServer(uint16_t port);
+        ~UdpServer();
 
-void InitEcs();
+        bool start();
+        void stop();
+        
+        // Empile un message à envoyer à un client spécifique
+        void send(const std::string& clientKey, const std::vector<uint8_t>& data);
+        
+        // Récupère les messages reçus depuis la queue thread-safe
+        bool popMessage(std::pair<std::string, std::vector<uint8_t>>& msg);
+
+        // Nettoyage des clients inactifs
+        void cleanInactiveClients(int timeoutSeconds = 10);
+
+        bool isRunning() const { return _running; }
+
+    private:
+        void receiveLoop();
+        bool setSocketOptions();
+        void removeClient(const std::string& clientKey);
+
+        NetworkInitializer _netInit; // RAII pour Windows
+        SocketType _socket;
+        sockaddr_in _serverAddr;
+        uint16_t _port;
+        bool _running;
+        bool _debug{true}; // Mettre à false en prod
+
+        std::mutex _clientMutex;
+        std::unordered_map<std::string, ClientInfo> _clients;
+
+        // Queue thread-safe pour les messages entrants
+        // On évite d'inclure ThreadQueue partout, on utilise un pointeur opaque ou include
+        // Ici simplification: on suppose que vous gérez la queue
+        // Pour l'exemple je mets des vectors protégés, mais utilisez votre ThreadQueue
+        std::mutex _queueMutex;
+        std::vector<std::pair<std::string, std::vector<uint8_t>>> _incomingQueue;
+    };
+}

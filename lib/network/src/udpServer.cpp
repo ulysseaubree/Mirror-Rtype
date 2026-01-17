@@ -1,340 +1,197 @@
-/*
-** EPITECH PROJECT, 2025
-** r-type
-** File description:
-** UdpServer
-*/
-
 #include "../includes/udpServer.hpp"
-#include "../includes/threadQueue.hpp"
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <cstring>
 #include <iostream>
-#include <chrono>
-#include <algorithm>
+#include <cstring>
+#include <thread>
 
-ClientInfo::ClientInfo(const sockaddr_in& addr)
-    : address(addr)
-{
-    char ip_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &addr.sin_addr, ip_str, INET_ADDRSTRLEN);
-    ip = ip_str;
-    port = ntohs(addr.sin_port);
-    lastSeen = std::chrono::steady_clock::now();
-}
+namespace rtype::net {
 
-std::string ClientInfo::getKey() const
-{
-    return ip + ":" + std::to_string(port);
-}
+    ClientInfo::ClientInfo(const sockaddr_in& addr) : address(addr)
+    {
+        char ipStr[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(addr.sin_addr), ipStr, INET_ADDRSTRLEN);
+        ip = std::string(ipStr);
+        port = ntohs(addr.sin_port);
+        lastSeen = std::chrono::steady_clock::now();
+    }
 
-UdpServer::UdpServer(int port, bool debug)
-    : _port(port)
-    , _socket(-1)
-    , _initialized(false)
-    , _debug(debug)
-{
-    std::memset(&_serverAddr, 0, sizeof(_serverAddr));
-    _serverAddr.sin_family = AF_INET;
-    _serverAddr.sin_addr.s_addr = INADDR_ANY;
-    _serverAddr.sin_port = htons(_port);
-    
-    _recive = new ThQueue();
-    _send = new ThQueue();
-}
+    std::string ClientInfo::getKey() const
+    {
+        return ip + ":" + std::to_string(port);
+    }
 
-UdpServer::~UdpServer()
-{
-    if (_initialized) {
-        disconnect();
+    UdpServer::UdpServer(uint16_t port) : 
+        _socket(INVALID_SOCKET), 
+        _port(port), 
+        _running(false)
+    {
     }
-    delete _send;
-    delete _recive;
-}
 
-bool UdpServer::initSocket()
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    
-    _socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (_socket < 0) {
-        std::cerr << "Erreur lors de la création du socket UDP." << std::endl;
-        return false;
+    UdpServer::~UdpServer()
+    {
+        stop();
     }
-    
-    if (!setSocketOptions()) {
-        close(_socket);
-        return false;
-    }
-    
-    if (bind(_socket, reinterpret_cast<sockaddr*>(&_serverAddr), sizeof(_serverAddr)) < 0) {
-        std::cerr << "Erreur lors du bind sur le port " << _port << std::endl;
-        close(_socket);
-        return false;
-    }
-    
-    _initialized = true;
-    
-    if (_debug) {
-        // std::cout << "Serveur UDP démarré sur le port " << _port << std::endl;
-    }
-    
-    return true;
-}
 
-bool UdpServer::sendData(const std::string& data, const ClientInfo& client)
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    
-    if (!_initialized) {
-        std::cerr << "Le socket n'a pas été initialisé." << std::endl;
-        return false;
-    }
-    
-    if (data.empty()) {
-        return false;
-    }
-    
-    ssize_t bytes_sent = sendto(_socket, data.c_str(), data.size(), 0,
-                                reinterpret_cast<const sockaddr*>(&client.address),
-                                sizeof(client.address));
-    
-    if (bytes_sent < 0) {
-        std::cerr << "Erreur lors de l'envoi de données UDP à "
-                  << client.getKey() << std::endl;
-        return false;
-    }
-    
-    if (_debug) {
-        // std::cout << "Envoyé à " << client.getKey() << " : " 
-        //           << data << " (" << bytes_sent << " octets)" << std::endl;
-    }
-    
-    return true;
-}
-
-bool UdpServer::broadcast(const std::string& data)
-{
-    std::lock_guard<std::mutex> clientLock(_clientMutex);
-    
-    if (_clients.empty()) {
-        if (_debug) {
-            // std::cout << "Aucun client pour le broadcast." << std::endl;
+    bool UdpServer::start()
+    {
+        // Création du socket
+        _socket = socket(AF_INET, SOCK_DGRAM, 0);
+        if (!IS_VALID_SOCKET(_socket)) {
+            std::cerr << "Erreur création socket UDP: " << LAST_ERROR << std::endl;
+            return false;
         }
-        return false;
-    }
-    
-    bool allSuccess = true;
-    for (const auto& [key, client] : _clients) {
-        if (!sendData(data, client)) {
-            allSuccess = false;
+
+        // Options
+        if (!setSocketOptions()) {
+            CLOSESOCKET(_socket);
+            return false;
         }
-    }
-    
-    return allSuccess;
-}
 
-std::string UdpServer::receiveData(int bufferSize)
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    
-    if (!_initialized) {
-        std::cerr << "Le socket n'a pas été initialisé." << std::endl;
-        return "";
-    }
-    
-    // Non-blocking check
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(_socket, &readfds);
-    
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 100000; // 100ms
-    
-    int activity = select(_socket + 1, &readfds, nullptr, nullptr, &timeout);
-    
-    if (activity <= 0) {
-        return "";
-    }
-    
-    // Use unique_ptr for RAII
-    auto buffer = std::make_unique<char[]>(bufferSize + 1);
-    std::memset(buffer.get(), 0, bufferSize + 1);
-    
-    sockaddr_in client_addr;
-    socklen_t addr_len = sizeof(client_addr);
-    
-    ssize_t bytes_received = recvfrom(_socket, buffer.get(), bufferSize, 0,
-                                      reinterpret_cast<sockaddr*>(&client_addr),
-                                      &addr_len);
-    
-    if (bytes_received <= 0) {
-        return "";
-    }
-    
-    std::string data(buffer.get(), bytes_received);
-    
-    // Update client info
-    _lastClient = std::make_unique<ClientInfo>(client_addr);
-    updateClient(*_lastClient);
-    
-    if (_debug) {
-        // std::cout << "Reçu de " << _lastClient->getKey() << " : " << data << std::endl;
-    }
-    
-    return data;
-}
+        // Bind
+        std::memset(&_serverAddr, 0, sizeof(_serverAddr));
+        _serverAddr.sin_family = AF_INET;
+        _serverAddr.sin_addr.s_addr = INADDR_ANY;
+        _serverAddr.sin_port = htons(_port);
 
-void UdpServer::disconnect()
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    
-    if (_initialized) {
-        close(_socket);
-        _initialized = false;
+        if (bind(_socket, reinterpret_cast<sockaddr*>(&_serverAddr), sizeof(_serverAddr)) == SOCKET_ERROR) {
+            std::cerr << "Erreur bind UDP: " << LAST_ERROR << std::endl;
+            CLOSESOCKET(_socket);
+            return false;
+        }
+
+        _running = true;
         
-        if (_debug) {
-            // std::cout << "Serveur UDP arrêté." << std::endl;
-        }
-    }
-}
-
-void UdpServer::setSend(const std::string& data, const std::string& clientKey)
-{
-    // Preserve data as binary without appending CR/LF.  Prepend the
-    // client key using a delimiter so the send thread knows to whom
-    // the packet is destined.
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    _send->push(clientKey + "|" + data);
-}
-
-void UdpServer::setReceive(const std::string& data)
-{
-    if (data.empty()) {
-        return;
-    }
-    
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    _recive->push(data);
-}
-
-ThQueue* UdpServer::getSend()
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    return _send;
-}
-
-ThQueue* UdpServer::getReceive()
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    return _recive;
-}
-
-void UdpServer::updateClient(const ClientInfo& client)
-{
-    std::lock_guard<std::mutex> lock(_clientMutex);
-    
-    std::string key = client.getKey();
-    auto it = _clients.find(key);
-    
-    if (it != _clients.end()) {
-        it->second.lastSeen = std::chrono::steady_clock::now();
-    } else {
-        _clients[key] = client;
-        if (_debug) {
-            // std::cout << "Nouveau client connecté : " << key << std::endl;
-        }
-    }
-}
-
-bool UdpServer::setSocketOptions()
-{
-    struct timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 100000;
-
-    if (setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-        if (_debug) {
-            std::cerr << "Warning: Could not set SO_RCVTIMEO" << std::endl;
-        }
-    }
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-
-    if (setsockopt(_socket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
-        if (_debug) {
-            std::cerr << "Warning: Could not set SO_SNDTIMEO" << std::endl;
-        }
-    }
-
-    return true;
-}
-
-void UdpServer::removeClient(const std::string& clientKey)
-{
-    std::lock_guard<std::mutex> lock(_clientMutex);
-    
-    auto it = _clients.find(clientKey);
-    if (it != _clients.end()) {
-        _clients.erase(it);
-        if (_debug) {
-            // std::cout << "Client déconnecté : " << clientKey << std::endl;
-        }
-    }
-}
-
-std::vector<ClientInfo> UdpServer::getActiveClients(int timeoutSeconds)
-{
-    std::lock_guard<std::mutex> lock(_clientMutex);
-    
-    std::vector<ClientInfo> activeClients;
-    auto now = std::chrono::steady_clock::now();
-    
-    for (auto it = _clients.begin(); it != _clients.end();) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - it->second.lastSeen
-        ).count();
+        // Démarrage du thread de réception
+        std::thread([this]() { receiveLoop(); }).detach();
         
-        if (elapsed > timeoutSeconds) {
-            if (_debug) {
-                // std::cout << "Client timeout : " << it->first << std::endl;
+        std::cout << "Serveur UDP démarré sur le port " << _port << std::endl;
+        return true;
+    }
+
+    void UdpServer::stop()
+    {
+        _running = false;
+        if (IS_VALID_SOCKET(_socket)) {
+            CLOSESOCKET(_socket);
+            _socket = INVALID_SOCKET;
+        }
+    }
+
+    bool UdpServer::setSocketOptions()
+    {
+        // 1. Timeout Réception (avoid blocking forever) : 100ms
+        if (!SetSocketTimeout(_socket, SO_RCVTIMEO, 0, 100000)) {
+            if (_debug) std::cerr << "Warning: Could not set SO_RCVTIMEO" << std::endl;
+        }
+
+        // 2. Timeout Envoi : 1s
+        if (!SetSocketTimeout(_socket, SO_SNDTIMEO, 1, 0)) {
+            if (_debug) std::cerr << "Warning: Could not set SO_SNDTIMEO" << std::endl;
+        }
+
+        return true;
+    }
+
+    void UdpServer::receiveLoop()
+    {
+        std::vector<uint8_t> buffer(4096); 
+        sockaddr_in clientAddr;
+        SockLen clientLen = sizeof(clientAddr);
+
+        while (_running) {
+            ssize_t bytesReceived = recvfrom(
+                _socket, 
+                reinterpret_cast<char*>(buffer.data()), // Cast char* nécessaire pour Win
+                static_cast<int>(buffer.size()),        // Cast int pour Length
+                0, 
+                reinterpret_cast<sockaddr*>(&clientAddr), 
+                &clientLen
+            );
+
+            if (bytesReceived > 0) {
+                // Gestion Client
+                ClientInfo info(clientAddr);
+                std::string key = info.getKey();
+
+                {
+                    std::lock_guard<std::mutex> lock(_clientMutex);
+                    auto it = _clients.find(key);
+                    if (it == _clients.end()) {
+                        _clients[key] = info;
+                        if (_debug) std::cout << "Nouveau client: " << key << std::endl;
+                    } else {
+                        it->second.lastSeen = std::chrono::steady_clock::now();
+                    }
+                }
+
+                // Push message to queue
+                std::vector<uint8_t> data(buffer.begin(), buffer.begin() + bytesReceived);
+                {
+                    std::lock_guard<std::mutex> qLock(_queueMutex);
+                    _incomingQueue.push_back({key, data});
+                }
+            } 
+            else if (bytesReceived == SOCKET_ERROR) {
+                // Sur Windows, WSAGetLastError() pour check si c'est un timeout
+                // Sur Linux, errno
+                // Ici on ignore les timeouts normaux
             }
-            it = _clients.erase(it);
-        } else {
-            activeClients.push_back(it->second);
-            ++it;
+        }
+    }
+
+    void UdpServer::send(const std::string& clientKey, const std::vector<uint8_t>& data)
+    {
+        sockaddr_in target;
+        {
+            std::lock_guard<std::mutex> lock(_clientMutex);
+            auto it = _clients.find(clientKey);
+            if (it == _clients.end()) return; // Client inconnu
+            target = it->second.address;
+        }
+
+        ssize_t sent = sendto(
+            _socket,
+            reinterpret_cast<const char*>(data.data()),
+            static_cast<int>(data.size()),
+            0,
+            reinterpret_cast<sockaddr*>(&target),
+            sizeof(target)
+        );
+
+        if (sent < 0 && _debug) {
+            std::cerr << "Erreur send UDP vers " << clientKey << std::endl;
+        }
+    }
+
+    void UdpServer::removeClient(const std::string& clientKey)
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        auto it = _clients.find(clientKey);
+        if (it != _clients.end()) {
+            _clients.erase(it);
+        }
+    }
+
+    void UdpServer::cleanInactiveClients(int timeoutSeconds)
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        auto now = std::chrono::steady_clock::now();
+        
+        for (auto it = _clients.begin(); it != _clients.end(); ) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.lastSeen).count();
+            if (elapsed > timeoutSeconds) {
+                if (_debug) std::cout << "Timeout client: " << it->first << std::endl;
+                it = _clients.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
     
-    return activeClients;
-}
-
-size_t UdpServer::getClientCount() const
-{
-    std::lock_guard<std::mutex> lock(_clientMutex);
-    return _clients.size();
-}
-
-
-bool UdpServer::getDebug() const
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    return _debug;
-}
-
-void UdpServer::setDebug(bool debug)
-{
-    std::lock_guard<std::mutex> lock(_socketMutex);
-    _debug = debug;
-}
-
-int UdpServer::getPort() const
-{
-    return _port;
+    bool UdpServer::popMessage(std::pair<std::string, std::vector<uint8_t>>& msg) {
+        std::lock_guard<std::mutex> lock(_queueMutex);
+        if (_incomingQueue.empty()) return false;
+        msg = _incomingQueue.front();
+        _incomingQueue.erase(_incomingQueue.begin());
+        return true;
+    }
 }
