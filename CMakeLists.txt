@@ -182,14 +182,15 @@ endif()
 if(BUILD_TESTS)
     enable_testing()
     
-    # Vous pouvez ajouter Google Test ou Catch2 ici
-    message(STATUS "Tests enabled")
+    add_executable(ecs_tests
+        ${CMAKE_SOURCE_DIR}/tests/test_ecs.cpp
+    )
     
-    # Exemple avec Catch2
-    # find_package(Catch2 REQUIRED)
-    # add_executable(ecs_tests tests/test_main.cpp tests/test_ecs.cpp)
-    # target_link_libraries(ecs_tests PRIVATE ecs_lib Catch2::Catch2)
-    # add_test(NAME ECSTests COMMAND ecs_tests)
+    target_include_directories(ecs_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/ecs/core
+    )
+    
+    add_test(NAME ecs_core COMMAND ecs_tests)
 endif()
 
 # ========================================

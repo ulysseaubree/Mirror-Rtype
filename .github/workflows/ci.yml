@@ -1,0 +1,36 @@
+name: Build & Tests
+
+on:
+  push:
+    branches: [ "main", "ci/cd" ]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (CMake)
+    runs-on: [self-hosted, linux, ARM64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
+
+      - name: Installer les dépendances système
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsfml-dev ninja-build
+
+      - name: Configurer CMake
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+
+      - name: Compiler
+        run: cmake --build build --config Release
+
+      - name: Tests unitaires
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Publier les binaires
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@c7d193f32e21cbdcfb4184e7b48f3867921d6f72
+        with:
+          name: rtype-bin
+          path: build/bin
+          if-no-files-found: ignore
