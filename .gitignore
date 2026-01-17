@@ -3,3 +3,10 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 CMakeCache.txt
+/build/
+*.o
+*.exe
+*.out
+CMakeCache.txt
+_deps/
+bin/
