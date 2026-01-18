@@ -1,0 +1,26 @@
+name: Mirror to Epitech
+
+on:
+  push:
+    branches:
+      - '**'
+  delete:
+    branches:
+      - '**'
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Epitech
+        env:
+          EPITECH_TOKEN: ${{ secrets.EPITECH_PAT }}
+        run: |
+          git remote add epitech https://x-access-token:$\{EPITECH_TOKEN\}@github.com/EpitechPGE3-2025/G-CPP-500-LYN-5-2-rtype-8.git
+          git push --mirror epitech || echo "Mirror push failed but continuing"
